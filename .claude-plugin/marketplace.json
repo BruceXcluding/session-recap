@@ -18,17 +18,7 @@
       },
       "homepage": "https://github.com/BruceXcluding/session-recap",
       "license": "MIT",
-      "keywords": [
-        "session",
-        "summary",
-        "recap",
-        "context",
-        "long-session",
-        "memory",
-        "codex",
-        "opencode",
-        "dsh"
-      ]
+      "keywords": ["session", "summary", "recap", "context", "long-session", "memory", "codex", "opencode", "dsh"]
     }
   ]
 }

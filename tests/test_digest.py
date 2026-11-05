@@ -34,13 +34,25 @@ def write_lines(path, records):
 
 def claude_user(text, ts="2026-11-01T10:00:00.000Z", cwd="/code/app", **extra):
     # Messages put other fields first; bookkeeping records start with "type".
-    return {"parentUuid": None, "type": "user", "cwd": cwd, "timestamp": ts, "gitBranch": "main",
-            "message": {"role": "user", "content": text}, **extra}
+    return {
+        "parentUuid": None,
+        "type": "user",
+        "cwd": cwd,
+        "timestamp": ts,
+        "gitBranch": "main",
+        "message": {"role": "user", "content": text},
+        **extra,
+    }
 
 
 def claude_assistant(*blocks, ts="2026-11-01T10:01:00.000Z"):
-    return {"parentUuid": None, "type": "assistant", "cwd": "/code/app", "timestamp": ts,
-            "message": {"role": "assistant", "content": list(blocks)}}
+    return {
+        "parentUuid": None,
+        "type": "assistant",
+        "cwd": "/code/app",
+        "timestamp": ts,
+        "message": {"role": "assistant", "content": list(blocks)},
+    }
 
 
 def text(t):
@@ -75,22 +87,32 @@ class Base(unittest.TestCase):
 
 class ClaudeTest(Base):
     def test_keeps_prompts_last_reply_actions_and_edits(self):
-        path = self.claude("s1", [
-            {"type": "file-history-snapshot", "snapshot": {}},
-            claude_user("<system-reminder>ignore me</system-reminder>Build the checkout"),
-            claude_user("hidden", isMeta=True),
-            claude_user([{"type": "tool_result", "tool_use_id": "t", "content": "tool output"}]),
-            claude_assistant(text("Looking around first."), tool("Read", file_path="/code/app/x.ts")),
-            claude_assistant(tool("Edit", file_path="/code/app/a.ts"), tool("Bash", command="git commit -m 'one page'")),
-            claude_assistant(text("Done: one page.")),
-            {**claude_user("sub agent"), "isSidechain": True},
-            {"type": "custom-title", "customTitle": "Checkout"},
-        ])
+        path = self.claude(
+            "s1",
+            [
+                {"type": "file-history-snapshot", "snapshot": {}},
+                claude_user("<system-reminder>ignore me</system-reminder>Build the checkout"),
+                claude_user("hidden", isMeta=True),
+                claude_user([{"type": "tool_result", "tool_use_id": "t", "content": "tool output"}]),
+                claude_assistant(text("Looking around first."), tool("Read", file_path="/code/app/x.ts")),
+                claude_assistant(
+                    tool("Edit", file_path="/code/app/a.ts"), tool("Bash", command="git commit -m 'one page'")
+                ),
+                claude_assistant(text("Done: one page.")),
+                {**claude_user("sub agent"), "isSidechain": True},
+                {"type": "custom-title", "customTitle": "Checkout"},
+            ],
+        )
         d = digest.digest("claude", path)
-        self.assertEqual((d["title"], d["prompts"], d["files"], d["branch"]), ("Checkout", 1, ["/code/app/a.ts"], "main"))
-        self.assertEqual(d["text"], "[USER 2026-11-01 10:00] Build the checkout\n"
-                                    "  · git commit -m 'one page'\n"
-                                    "[ASSISTANT] Done: one page.")
+        self.assertEqual(
+            (d["title"], d["prompts"], d["files"], d["branch"]), ("Checkout", 1, ["/code/app/a.ts"], "main")
+        )
+        self.assertEqual(
+            d["text"],
+            "[USER 2026-11-01 10:00] Build the checkout\n"
+            "  · git commit -m 'one page'\n"
+            "[ASSISTANT] Done: one page.",
+        )
 
     def test_from_keeps_later_turns_and_the_last_covered_one(self):
         records = [claude_user("ask %d" % i) for i in range(5)]
@@ -115,12 +137,16 @@ class ClaudeTest(Base):
         self.assertIn("ask 799 ", out)
 
     def test_injected_blocks_are_removed_from_prompts(self):
-        path = self.claude("s1", [claude_user('look <in-app-browser-context source="x">page</in-app-browser-context> here')])
+        path = self.claude(
+            "s1", [claude_user('look <in-app-browser-context source="x">page</in-app-browser-context> here')]
+        )
         self.assertIn("look  here", digest.digest("claude", path)["text"])
 
     def test_project_is_named_by_its_own_folder(self):
-        self.claude("s1", [claude_user("start", cwd="/tmp/scratch-1"),
-                           claude_user("moved", ts="2026-11-02T10:00:00.000Z")])
+        self.claude(
+            "s1",
+            [claude_user("start", cwd="/tmp/scratch-1"), claude_user("moved", ts="2026-11-02T10:00:00.000Z")],
+        )
         rows = digest.list_projects()
         self.assertEqual(rows[0]["cwd"], "/code/app")
         self.assertEqual(rows[0]["agents"], {"claude": 1})
@@ -137,8 +163,11 @@ class ClaudeTest(Base):
 class CodexTest(Base):
     def rollout(self, name, source, records):
         path = os.path.join(self.home, ".codex", "sessions", "2026", "11", "01", "rollout-%s.jsonl" % name)
-        meta = {"timestamp": "2026-11-01T09:00:00.000Z", "type": "session_meta",
-                "payload": {"id": name, "cwd": "/code/api", "thread_source": source, "git": {"branch": "dev"}}}
+        meta = {
+            "timestamp": "2026-11-01T09:00:00.000Z",
+            "type": "session_meta",
+            "payload": {"id": name, "cwd": "/code/api", "thread_source": source, "git": {"branch": "dev"}},
+        }
         write_lines(path, [meta] + records)
         return path
 
@@ -146,18 +175,66 @@ class CodexTest(Base):
         return {"timestamp": ts, "type": "response_item", "payload": payload}
 
     def test_reads_a_codex_rollout(self):
-        path = self.rollout("t1", "user", [
-            self.item({"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "rules"}]}),
-            self.item({"type": "message", "role": "user", "content": [
-                {"type": "input_text", "text": "<environment_context>\n<cwd>/code/api</cwd>\n</environment_context>"}]}),
-            self.item({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Fix the login loop"}]}),
-            self.item({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Checking cookies."}]}),
-            self.item({"type": "function_call", "name": "exec_command", "arguments": json.dumps({"cmd": "gh pr create --fill"})}),
-            self.item({"type": "custom_tool_call", "name": "apply_patch",
-                       "input": "*** Begin Patch\n*** Update File: src/login.ts\n@@\n*** Add File: src/new.ts\n"}),
-            {"timestamp": "2026-11-01T09:09:00.000Z", "type": "event_msg",
-             "payload": {"type": "task_complete", "last_agent_message": "Fixed; PR opened."}},
-        ])
+        path = self.rollout(
+            "t1",
+            "user",
+            [
+                self.item(
+                    {
+                        "type": "message",
+                        "role": "developer",
+                        "content": [{"type": "input_text", "text": "rules"}],
+                    }
+                ),
+                self.item(
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "<environment_context>\n<cwd>/code/api</cwd>\n</environment_context>",
+                            }
+                        ],
+                    }
+                ),
+                self.item(
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "Fix the login loop"}],
+                    }
+                ),
+                self.item(
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "Checking cookies."}],
+                    }
+                ),
+                self.item(
+                    {
+                        "type": "function_call",
+                        "name": "exec_command",
+                        "arguments": json.dumps({"cmd": "gh pr create --fill"}),
+                    }
+                ),
+                self.item(
+                    {
+                        "type": "custom_tool_call",
+                        "name": "apply_patch",
+                        "input": (
+                            "*** Begin Patch\n*** Update File: src/login.ts\n@@\n*** Add File: src/new.ts\n"
+                        ),
+                    }
+                ),
+                {
+                    "timestamp": "2026-11-01T09:09:00.000Z",
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete", "last_agent_message": "Fixed; PR opened."},
+                },
+            ],
+        )
         self.rollout("r1", "guardian_review", [])
         with open(os.path.join(self.home, ".codex", "session_index.jsonl"), "w") as f:
             f.write(compact({"id": "t1", "thread_name": "Login loop"}) + "\n")
@@ -165,9 +242,12 @@ class CodexTest(Base):
         self.assertEqual([(r["agent"], r["id"], r["title"]) for r in rows], [("codex", "t1", "Login loop")])
         d = digest.digest("codex", path)
         self.assertEqual((d["prompts"], d["branch"], d["files"]), (1, "dev", ["src/login.ts", "src/new.ts"]))
-        self.assertEqual(d["text"], "[USER 2026-11-01 09:05] Fix the login loop\n"
-                                    "  · gh pr create --fill\n"
-                                    "[ASSISTANT] Fixed; PR opened.")
+        self.assertEqual(
+            d["text"],
+            "[USER 2026-11-01 09:05] Fix the login loop\n"
+            "  · gh pr create --fill\n"
+            "[ASSISTANT] Fixed; PR opened.",
+        )
 
 
 @unittest.skipUnless(HAS_ZSTD, "needs the zstd command")
@@ -182,15 +262,39 @@ class DshTest(Base):
         return raw + ".zstd"
 
     def test_reads_a_dsh_session(self):
-        path = self.session("session-1", [
-            {"type": "user/message", "time": 1793000000000,
-             "data": {"content": [{"type": "text", "text": "Read the project"}], "source": {"kind": "user"}}},
-            {"type": "session/title", "data": {"title": "Explore web"}},
-            {"type": "assistant/message", "data": {"message": {"content": [
-                {"type": "reasoning", "text": "thinking"}, {"type": "text", "text": "It is a shop."}]}}},
-            {"type": "tool/call", "data": {"name": "bash", "arguments": json.dumps({"command": "git push origin main"})}},
-            {"type": "tool/call", "data": {"name": "write_file", "arguments": json.dumps({"path": "notes.md"})}},
-        ])
+        path = self.session(
+            "session-1",
+            [
+                {
+                    "type": "user/message",
+                    "time": 1793000000000,
+                    "data": {
+                        "content": [{"type": "text", "text": "Read the project"}],
+                        "source": {"kind": "user"},
+                    },
+                },
+                {"type": "session/title", "data": {"title": "Explore web"}},
+                {
+                    "type": "assistant/message",
+                    "data": {
+                        "message": {
+                            "content": [
+                                {"type": "reasoning", "text": "thinking"},
+                                {"type": "text", "text": "It is a shop."},
+                            ]
+                        }
+                    },
+                },
+                {
+                    "type": "tool/call",
+                    "data": {"name": "bash", "arguments": json.dumps({"command": "git push origin main"})},
+                },
+                {
+                    "type": "tool/call",
+                    "data": {"name": "write_file", "arguments": json.dumps({"path": "notes.md"})},
+                },
+            ],
+        )
         self.session("session-2", [], {"origin": "subagent", "delegationDepth": 1})
         rows = digest.list_sessions("/code/web")
         self.assertEqual([(r["agent"], r["title"]) for r in rows], [("dsh", "Explore web")])
@@ -201,14 +305,34 @@ class DshTest(Base):
         self.assertNotIn("thinking", d["text"])
 
     def test_a_migrated_session_is_read_from_its_newer_file(self):
-        new = self.session("session-3", [
-            {"type": "user/message", "data": {"content": [{"type": "text", "text": "after migration"}],
-                                              "source": {"kind": "user"}}}])
+        new = self.session(
+            "session-3",
+            [
+                {
+                    "type": "user/message",
+                    "data": {
+                        "content": [{"type": "text", "text": "after migration"}],
+                        "source": {"kind": "user"},
+                    },
+                }
+            ],
+        )
         folder = os.path.dirname(new)
         old_raw = os.path.join(folder, "session.jsonl")
-        write_lines(old_raw, [{"type": "session", "id": "session-3", "cwd": "/code/web"}] +
-                    [{"type": "user/message", "data": {"content": [{"type": "text", "text": "old %d %s" % (i, "x" * 400)}],
-                                                       "source": {"kind": "user"}}} for i in range(200)])
+        write_lines(
+            old_raw,
+            [{"type": "session", "id": "session-3", "cwd": "/code/web"}]
+            + [
+                {
+                    "type": "user/message",
+                    "data": {
+                        "content": [{"type": "text", "text": "old %d %s" % (i, "x" * 400)}],
+                        "source": {"kind": "user"},
+                    },
+                }
+                for i in range(200)
+            ],
+        )
         subprocess.run(["zstd", "-q", "--rm", "-o", old_raw + ".zstd", old_raw], check=True)
         os.utime(old_raw + ".zstd", (1_000_000, 1_000_000))
         self.assertGreater(os.path.getsize(old_raw + ".zstd"), os.path.getsize(new))
@@ -230,14 +354,24 @@ class OpenCodeTest(Base):
         db.execute("insert into session values ('ses2', 'p', 'ses1', '/code/cli', 'child', 1793000000000)")
         db.execute("insert into message values ('m1', 'ses1', 1, ?)", (compact({"role": "user"}),))
         db.execute("insert into message values ('m2', 'ses1', 2, ?)", (compact({"role": "assistant"}),))
-        db.execute("insert into part values ('p1', 'm1', 'ses1', 1, ?)", (compact({"type": "text", "text": "Add a --json flag"}),))
-        db.execute("insert into part values ('p2', 'm2', 'ses1', 2, ?)",
-                   (compact({"type": "tool", "tool": "edit", "state": {"input": {"filePath": "cli.ts"}}}),))
-        db.execute("insert into part values ('p3', 'm2', 'ses1', 3, ?)", (compact({"type": "text", "text": "Added."}),))
+        db.execute(
+            "insert into part values ('p1', 'm1', 'ses1', 1, ?)",
+            (compact({"type": "text", "text": "Add a --json flag"}),),
+        )
+        db.execute(
+            "insert into part values ('p2', 'm2', 'ses1', 2, ?)",
+            (compact({"type": "tool", "tool": "edit", "state": {"input": {"filePath": "cli.ts"}}}),),
+        )
+        db.execute(
+            "insert into part values ('p3', 'm2', 'ses1', 3, ?)",
+            (compact({"type": "text", "text": "Added."}),),
+        )
         db.commit()
         db.close()
         rows = digest.list_sessions("/code/cli")
-        self.assertEqual([(r["agent"], r["id"], r["title"]) for r in rows], [("opencode", "ses1", "Add flags")])
+        self.assertEqual(
+            [(r["agent"], r["id"], r["title"]) for r in rows], [("opencode", "ses1", "Add flags")]
+        )
         d = digest.digest("opencode", rows[0]["path"])
         self.assertEqual((d["prompts"], d["files"]), (1, ["cli.ts"]))
         self.assertTrue(d["text"].endswith("Add a --json flag\n[ASSISTANT] Added."))
@@ -255,8 +389,13 @@ class CommandTest(Base):
 
     def test_cli_prints_json(self):
         self.claude("s1", [claude_user("hello")])
-        out = subprocess.run([sys.executable, "-I", SCRIPT, "find", "hello"], capture_output=True, text=True,
-                             check=True, env={**os.environ}).stdout
+        out = subprocess.run(
+            [sys.executable, "-I", SCRIPT, "find", "hello"],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**os.environ},
+        ).stdout
         self.assertEqual(json.loads(out)[0]["cwd"], "/code/app")
 
 

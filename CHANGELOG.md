@@ -24,6 +24,9 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - `/session-recap` and name lookups scan sessions once instead of three times;
   `session-recap list` scans once instead of once per project.
+- Code quality: the CLI is fully typed (JSDoc, checked with `tsc --strict`); Python is
+  linted and formatted with ruff, JavaScript with Prettier; CI runs all three.
+- Added CONTRIBUTING.md, SECURITY.md and .editorconfig.
 
 ## [0.3.0] - 2026-11-05
 

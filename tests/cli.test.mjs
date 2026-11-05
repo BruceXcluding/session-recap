@@ -28,12 +28,15 @@ describe('detectAgent', () => {
 
 describe('modelConfig', () => {
   test('session-recap settings win over provider variables', () => {
-    const c = modelConfig({}, {
-      SESSION_RECAP_BASE_URL: 'http://gw',
-      SESSION_RECAP_API_KEY: 'k',
-      SESSION_RECAP_MODEL: 'm',
-      ANTHROPIC_API_KEY: 'a',
-    })
+    const c = modelConfig(
+      {},
+      {
+        SESSION_RECAP_BASE_URL: 'http://gw',
+        SESSION_RECAP_API_KEY: 'k',
+        SESSION_RECAP_MODEL: 'm',
+        ANTHROPIC_API_KEY: 'a',
+      },
+    )
     assert.deepEqual([c.api, c.baseUrl, c.apiKey, c.model, c.partModel], ['openai', 'http://gw', 'k', 'm', 'm'])
   })
 
@@ -85,7 +88,10 @@ describe('makeComplete', () => {
         assert.equal(url, 'http://gw/chat/completions')
         assert.equal(init.headers.authorization, 'Bearer k')
         if (calls === 1) return reply(429, { error: 'slow down' })
-        return reply(200, { choices: [{ message: { content: 'ok' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } })
+        return reply(200, {
+          choices: [{ message: { content: 'ok' } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        })
       },
     )
     assert.equal(await complete({ stage: 'merge', system: 's', prompt: 'p', maxTokens: 9 }), 'ok')
@@ -106,7 +112,9 @@ describe('makeComplete', () => {
         return reply(200, { choices: [{ message: { content: 'x' } }] })
       },
     )
-    await Promise.all(Array.from({ length: 10 }, () => complete({ stage: 'part', system: '', prompt: '', maxTokens: 1 })))
+    await Promise.all(
+      Array.from({ length: 10 }, () => complete({ stage: 'part', system: '', prompt: '', maxTokens: 1 })),
+    )
     assert.equal(peak, 4)
   })
 
@@ -159,7 +167,12 @@ describe('a whole run against a fake model server', () => {
       req.on('end', () => {
         requests.push(JSON.parse(body))
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ choices: [{ message: { content: `## Intent\nRecap ${requests.length}.` } }], usage: { prompt_tokens: 3, completion_tokens: 2 } }))
+        res.end(
+          JSON.stringify({
+            choices: [{ message: { content: `## Intent\nRecap ${requests.length}.` } }],
+            usage: { prompt_tokens: 3, completion_tokens: 2 },
+          }),
+        )
       })
     })
     await new Promise(r => server.listen(0, '127.0.0.1', r))
@@ -207,7 +220,13 @@ describe('a whole run against a fake model server', () => {
 
   test('a session that went on is updated from the new prompts only', async () => {
     const folder = join(home, '.claude', 'projects', project.replace(/[^a-zA-Z0-9]/g, '-'))
-    const line = { parentUuid: null, type: 'user', cwd: project, timestamp: '2026-11-03T10:00:00.000Z', message: { role: 'user', content: 'Step 3 of the app' } }
+    const line = {
+      parentUuid: null,
+      type: 'user',
+      cwd: project,
+      timestamp: '2026-11-03T10:00:00.000Z',
+      message: { role: 'user', content: 'Step 3 of the app' },
+    }
     appendFileSync(join(folder, 's1.jsonl'), `${JSON.stringify(line)}\n`)
     const r = await run('--agent', 'claude')
     assert.equal(r.code, 0, r.err)
@@ -244,7 +263,12 @@ describe('a whole run against a fake model server', () => {
   test('no model configured is a clear error', async () => {
     const child = spawn(process.execPath, [CLI, '--refresh'], {
       cwd: project,
-      env: { PATH: process.env.PATH, HOME: home, XDG_CACHE_HOME: join(home, '.cache'), XDG_CONFIG_HOME: join(home, '.config') },
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        XDG_CACHE_HOME: join(home, '.cache'),
+        XDG_CONFIG_HOME: join(home, '.config'),
+      },
     })
     let err = ''
     child.stderr.on('data', c => (err += c))

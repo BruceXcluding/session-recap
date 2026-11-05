@@ -1,0 +1,18 @@
+# Lint and format settings for hooks/digest.py and its tests (ruff).
+# digest.py is a single standard-library script: no dependencies, Python 3.9+.
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "I", "PL"]
+ignore = [
+  "PLR0911", "PLR0912", "PLR0913", "PLR0915",  # readers mirror each agent's record types
+  "PLR2004",                                    # small literals read clearer inline
+  "PLW2901",                                    # loops rebind `line` after cleaning it
+  "UP031",                                      # %-formatting kept where it reads simpler
+]
+
+[tool.ruff.format]
+quote-style = "double"

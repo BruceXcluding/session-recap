@@ -9,17 +9,7 @@
   "homepage": "https://github.com/BruceXcluding/session-recap",
   "repository": "https://github.com/BruceXcluding/session-recap",
   "license": "MIT",
-  "keywords": [
-    "session",
-    "summary",
-    "recap",
-    "context",
-    "long-session",
-    "memory",
-    "codex",
-    "opencode",
-    "dsh"
-  ],
+  "keywords": ["session", "summary", "recap", "context", "long-session", "memory", "codex", "opencode", "dsh"],
   "icon": "./.claude-plugin/icon.png",
   "types": "./types/index.d.ts",
   "userConfig": {

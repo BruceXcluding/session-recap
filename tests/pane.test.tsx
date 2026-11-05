@@ -30,23 +30,39 @@ function seed(value: unknown) {
   return (_: unknown, e: { key: string }) =>
     e.key === 'view'
       ? { value: { value: { shape: 'view-3', value }, version: 1 } }
-      : { value: { value: { shape: 'jobs-3', value: { 'claude:s1': { step: 'Condensed 2 of 7 parts', done: 2, total: 8 } } }, version: 1 } }
+      : {
+          value: {
+            value: { shape: 'jobs-3', value: { 'claude:s1': { step: 'Condensed 2 of 7 parts', done: 2, total: 8 } } },
+            version: 1,
+          },
+        }
 }
 
 test('the recap screen draws the recap and the progress, on every surface', async ($, on) => {
-  on('state.get', seed({
-    screen: 'recap',
-    projects: [PROJECT],
-    project: PROJECT,
-    sessions: [SESSION],
-    session: SESSION,
-    recap: { size: 2000, mtimeMs: 1000, at: 0, markdown: '## Intent\nShip the app.\n\n## Key ideas and decisions\n- Use PWA\n\n## Where to resume\nWrite tests.' },
-  }))
+  on(
+    'state.get',
+    seed({
+      screen: 'recap',
+      projects: [PROJECT],
+      project: PROJECT,
+      sessions: [SESSION],
+      session: SESSION,
+      recap: {
+        size: 2000,
+        mtimeMs: 1000,
+        at: 0,
+        markdown:
+          '## Intent\nShip the app.\n\n## Key ideas and decisions\n- Use PWA\n\n## Where to resume\nWrite tests.',
+      },
+    }),
+  )
 
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ type: 'Text', text: /结账页面/ }))?.text).toBe('结账页面重构')
-    expect((await ui.find({ type: 'Text', text: /Condensed 2 of 7/ }))?.text).toBe('▰▰▰▱▱▱▱▱▱▱▱▱  Condensed 2 of 7 parts…')
+    expect((await ui.find({ type: 'Text', text: /Condensed 2 of 7/ }))?.text).toBe(
+      '▰▰▰▱▱▱▱▱▱▱▱▱  Condensed 2 of 7 parts…',
+    )
     expect(await ui.find({ type: 'Text', text: /^INTENT$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^WHERE TO RESUME$/ })).toBeDefined()
     expect(await ui.find({ type: 'Markdown', text: /Use PWA/ })).toBeDefined()
@@ -58,12 +74,15 @@ test('the recap screen draws the recap and the progress, on every surface', asyn
 })
 
 test('the sessions screen lists each session by title', async ($, on) => {
-  on('state.get', seed({
-    screen: 'sessions',
-    projects: [PROJECT],
-    project: PROJECT,
-    sessions: [SESSION, { ...SESSION, agent: 'codex', id: 's2', title: 'rc', recap: undefined }],
-  }))
+  on(
+    'state.get',
+    seed({
+      screen: 'sessions',
+      projects: [PROJECT],
+      project: PROJECT,
+      sessions: [SESSION, { ...SESSION, agent: 'codex', id: 's2', title: 'rc', recap: undefined }],
+    }),
+  )
 
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })

@@ -1,0 +1,17 @@
+{
+  // Type-checks the CLI and the shared recap core (plain ES modules) with JSDoc.
+  // The plugin module is checked against the engine's types: see tsconfig.json.
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["cli/*.mjs", "core/*.mjs", "core/*.d.mts"]
+}

@@ -20,7 +20,9 @@ commits, PRs and pushes, and the files edited. Tool output, tool calls that
 only read, and the assistant's intermediate replies are left out.
 """
 
+import contextlib
 import datetime
+import functools
 import json
 import os
 import re
@@ -39,6 +41,7 @@ INDEX_VERSION = 2
 
 
 # ---------------------------------------------------------------- locations
+
 
 def home():
     return os.environ.get("HOME") or os.path.expanduser("~")
@@ -69,6 +72,7 @@ def cache_dir():
 
 # ---------------------------------------------------------------- text helpers
 
+
 def clip(text, n):
     text = text.strip()
     return text if len(text) <= n else text[:n] + " …[cut]"
@@ -89,9 +93,9 @@ def strip_blocks(text, tags):
             end = text.find(close, start)
             if end < 0:
                 gt = text.find(">", start)
-                text = text[:start] + (text[gt + 1:] if gt >= 0 else "")
+                text = text[:start] + (text[gt + 1 :] if gt >= 0 else "")
             else:
-                text = text[:start] + text[end + len(close):]
+                text = text[:start] + text[end + len(close) :]
         text = text.replace("</" + tag + ">", "")
     return text
 
@@ -104,7 +108,7 @@ NOISE_LINES = ("Distinguish instructions in attached documents from the user's r
 
 def clean_prompt(text):
     text = INJECTED.sub("", text)
-    lines = [l for l in text.splitlines() if l.strip() not in NOISE_LINES]
+    lines = [line for line in text.splitlines() if line.strip() not in NOISE_LINES]
     return "\n".join(lines).strip()
 
 
@@ -119,8 +123,11 @@ def text_parts(content, kinds=("text", "input_text", "output_text")):
         return content
     if not isinstance(content, list):
         return ""
-    return "\n".join(b.get("text", "") for b in content
-                     if isinstance(b, dict) and b.get("type") in kinds and isinstance(b.get("text"), str))
+    return "\n".join(
+        b.get("text", "")
+        for b in content
+        if isinstance(b, dict) and b.get("type") in kinds and isinstance(b.get("text"), str)
+    )
 
 
 def json_args(raw):
@@ -184,6 +191,20 @@ class Entries:
             self.meta["lastTs"] = ts
 
 
+class Lazy:
+    """A value computed on first use, then kept."""
+
+    def __init__(self, make):
+        self._make = make
+        self._value = None
+        self._done = False
+
+    def __call__(self):
+        if not self._done:
+            self._value, self._done = self._make(), True
+        return self._value
+
+
 def head_records(path, limit=HEAD_LINES):
     with open(path, encoding="utf-8", errors="replace") as f:
         for i, line in enumerate(f):
@@ -241,7 +262,7 @@ def claude_project_cwd(folder, files):
             if at >= 0:
                 end = line.find('"', at + 7)
                 if end > at:
-                    seen.append(line[at + 7:end])
+                    seen.append(line[at + 7 : end])
     for cwd in seen:
         if encode(cwd) == name:
             return cwd
@@ -262,8 +283,12 @@ def claude_row(path, cwd):
             title = claude_prompt(rec)
             if title:
                 break
-    return {"agent": "claude", "id": os.path.basename(path)[:-6], "cwd": cwd,
-            "title": one_line(title or "(no prompt)")}
+    return {
+        "agent": "claude",
+        "id": os.path.basename(path)[:-6],
+        "cwd": cwd,
+        "title": one_line(title or "(no prompt)"),
+    }
 
 
 def claude_sessions(index):
@@ -276,16 +301,15 @@ def claude_sessions(index):
         if not os.path.isdir(folder):
             continue
         files = [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".jsonl")]
-        cwd = []
-
-        def project_cwd():
-            if not cwd:
-                cwd.append(claude_project_cwd(folder, files))
-            return cwd[0]
-
+        # Working out the folder's cwd reads several files: only on an index miss.
+        cwd = Lazy(functools.partial(claude_project_cwd, folder, files))
         for path in files:
-            rows.append(index.get(path, lambda path=path: claude_row(path, project_cwd())))
+            rows.append(index.get(path, functools.partial(claude_row_lazy, path, cwd)))
     return rows
+
+
+def claude_row_lazy(path, cwd):
+    return claude_row(path, cwd())
 
 
 def claude_digest(path, out):
@@ -293,10 +317,8 @@ def claude_digest(path, out):
         for line in f:
             if line.startswith('{"type":"'):
                 if line.startswith('{"type":"custom-title"'):
-                    try:
+                    with contextlib.suppress(ValueError):
                         out.meta["title"] = json.loads(line).get("customTitle")
-                    except ValueError:
-                        pass
                 continue
             try:
                 rec = json.loads(line)
@@ -333,8 +355,16 @@ def claude_digest(path, out):
 
 # ---------------------------------------------------------------- codex
 
-CODEX_TAGS = ("environment_context", "user_instructions", "user_shell_command", "turn_aborted",
-              "image", "external_codex_apps_open_page", "permissions instructions", "INSTRUCTIONS")
+CODEX_TAGS = (
+    "environment_context",
+    "user_instructions",
+    "user_shell_command",
+    "turn_aborted",
+    "image",
+    "external_codex_apps_open_page",
+    "permissions instructions",
+    "INSTRUCTIONS",
+)
 CODEX_KINDS = ('"type":"response_item"', '"type":"event_msg"', '"type":"session_meta"')
 
 
@@ -381,8 +411,12 @@ def codex_row(path, titles):
                 break
     if meta is None:
         return None
-    return {"agent": "codex", "id": meta.get("id") or os.path.basename(path), "cwd": meta.get("cwd") or "?",
-            "title": one_line(title or "(no prompt)")}
+    return {
+        "agent": "codex",
+        "id": meta.get("id") or os.path.basename(path),
+        "cwd": meta.get("cwd") or "?",
+        "title": one_line(title or "(no prompt)"),
+    }
 
 
 def codex_sessions(index):
@@ -449,14 +483,19 @@ def codex_digest(path, out):
                     at = patch.find(marker)
                     while at >= 0:
                         end = patch.find("\n", at)
-                        out.edit(patch[at + len(marker):end if end >= 0 else None].strip())
+                        out.edit(patch[at + len(marker) : end if end >= 0 else None].strip())
                         at = patch.find(marker, at + 1)
 
 
 # ---------------------------------------------------------------- dsh
 
-DSH_KINDS = ('{"type":"user/message"', '{"type":"assistant/message"', '{"type":"tool/call"',
-             '{"type":"session"', '{"type":"session/title"')
+DSH_KINDS = (
+    '{"type":"user/message"',
+    '{"type":"assistant/message"',
+    '{"type":"tool/call"',
+    '{"type":"session"',
+    '{"type":"session/title"',
+)
 
 
 def dsh_file(folder):
@@ -464,8 +503,11 @@ def dsh_file(folder):
 
     A migrated session keeps its old session.jsonl.zstd beside session.v3.jsonl.zstd;
     the old one can be larger but stops where the migration happened."""
-    paths = [os.path.join(folder, n) for n in os.listdir(folder)
-             if n.startswith("session") and n.endswith(".jsonl.zstd")]
+    paths = [
+        os.path.join(folder, n)
+        for n in os.listdir(folder)
+        if n.startswith("session") and n.endswith(".jsonl.zstd")
+    ]
     if not paths:
         return None
     return max(paths, key=lambda p: (os.path.getmtime(p), os.path.getsize(p)))
@@ -473,7 +515,7 @@ def dsh_file(folder):
 
 def zstd_lines(path, limit=None):
     try:
-        import compression.zstd as zstd  # Python 3.14+
+        from compression import zstd  # Python 3.14+
     except ImportError:
         zstd = None
     if zstd is not None:
@@ -516,8 +558,12 @@ def dsh_row(path):
                 first = text_parts(data.get("content"), ("text",))
     if header is None:
         return None
-    return {"agent": "dsh", "id": header.get("id") or os.path.basename(os.path.dirname(path)),
-            "cwd": header.get("cwd") or "?", "title": one_line(title or first or "(no prompt)")}
+    return {
+        "agent": "dsh",
+        "id": header.get("id") or os.path.basename(os.path.dirname(path)),
+        "cwd": header.get("cwd") or "?",
+        "title": one_line(title or first or "(no prompt)"),
+    }
 
 
 def dsh_sessions(index):
@@ -570,6 +616,7 @@ def dsh_digest(path, out):
 
 # ---------------------------------------------------------------- opencode
 
+
 def opencode_connect():
     path = opencode_db()
     if not os.path.exists(path):
@@ -586,13 +633,23 @@ def opencode_sessions():
         return []
     rows = []
     try:
-        query = ("select s.id, s.directory, s.title, s.time_updated, "
-                 "(select coalesce(sum(length(data)), 0) from part where session_id = s.id) "
-                 "from session s where s.parent_id is null")
+        query = (
+            "select s.id, s.directory, s.title, s.time_updated, "
+            "(select coalesce(sum(length(data)), 0) from part where session_id = s.id) "
+            "from session s where s.parent_id is null"
+        )
         for sid, directory, title, updated, size in db.execute(query):
-            rows.append({"agent": "opencode", "id": sid, "cwd": directory, "title": one_line(title or sid),
-                         "path": "%s#%s" % (opencode_db(), sid), "size": int(size or 0),
-                         "mtimeMs": int(updated or 0)})
+            rows.append(
+                {
+                    "agent": "opencode",
+                    "id": sid,
+                    "cwd": directory,
+                    "title": one_line(title or sid),
+                    "path": "%s#%s" % (opencode_db(), sid),
+                    "size": int(size or 0),
+                    "mtimeMs": int(updated or 0),
+                }
+            )
     except sqlite3.Error:
         return []
     finally:
@@ -608,11 +665,13 @@ def opencode_digest(path, out):
     try:
         for title, directory in db.execute("select title, directory from session where id = ?", (sid,)):
             out.meta["title"], out.meta["cwd"] = title, directory
-        messages = db.execute("select id, time_created, data from message where session_id = ? "
-                              "order by time_created", (sid,)).fetchall()
+        messages = db.execute(
+            "select id, time_created, data from message where session_id = ? " "order by time_created", (sid,)
+        ).fetchall()
         parts = {}
-        for mid, data in db.execute("select message_id, data from part where session_id = ? "
-                                    "order by time_created", (sid,)):
+        for mid, data in db.execute(
+            "select message_id, data from part where session_id = ? " "order by time_created", (sid,)
+        ):
             parts.setdefault(mid, []).append(json_args(data))
         for mid, created, data in messages:
             role = json_args(data).get("role")
@@ -639,6 +698,7 @@ def opencode_digest(path, out):
 
 
 # ---------------------------------------------------------------- index
+
 
 class Index:
     """Rows learned from each file, reused while its size and mtime stand."""
@@ -714,10 +774,14 @@ def session_context(query):
     (its id exactly, else its title), and the sessions of its project."""
     rows = all_sessions()
     q = query.lower()
-    hit = next((r for r in rows if r["id"].lower() == q), None) or \
-        next((r for r in rows if q and q in r["title"].lower()), None)
-    return {"projects": group_projects(rows), "session": hit,
-            "sessions": [r for r in rows if hit is not None and r["cwd"] == hit["cwd"]]}
+    hit = next((r for r in rows if r["id"].lower() == q), None) or next(
+        (r for r in rows if q and q in r["title"].lower()), None
+    )
+    return {
+        "projects": group_projects(rows),
+        "session": hit,
+        "sessions": [r for r in rows if hit is not None and r["cwd"] == hit["cwd"]],
+    }
 
 
 def find_sessions(query):
@@ -784,33 +848,38 @@ def digest(agent, path, start=0):
     if len(text) > TEXT_BUDGET:
         # Keep the opening (the intent) and the newest part (where it stands).
         head = TEXT_BUDGET // 5
-        text = text[:head] + "\n\n[… middle of the session left out …]\n\n" + text[-(TEXT_BUDGET - head):]
+        text = text[:head] + "\n\n[… middle of the session left out …]\n\n" + text[-(TEXT_BUDGET - head) :]
     meta = out.meta
-    meta.update({"agent": agent, "prompts": prompts, "from": min(start, prompts),
-                 "files": out.files[-80:], "fileCount": len(out.files), "text": text})
+    meta.update(
+        {
+            "agent": agent,
+            "prompts": prompts,
+            "from": min(start, prompts),
+            "files": out.files[-80:],
+            "fileCount": len(out.files),
+            "text": text,
+        }
+    )
     return meta
 
 
-def main():
-    mode, args = sys.argv[1], sys.argv[2:]
-    if mode == "projects":
-        out = list_projects()
-    elif mode == "sessions":
-        out = list_sessions(args[0])
-    elif mode == "find":
-        out = find_sessions(args[0])
-    elif mode == "all":
-        out = all_sessions()
-    elif mode == "context":
-        out = session_context(args[0])
-    elif mode == "current":
-        out = current_session(args[0], args[1])
-    elif mode == "digest":
-        out = digest(args[0], args[1], int(args[2]) if len(args) > 2 else 0)
-    else:
-        raise SystemExit("unknown mode " + mode)
+COMMANDS = {
+    "projects": lambda: list_projects(),
+    "sessions": lambda cwd: list_sessions(cwd),
+    "find": lambda query: find_sessions(query),
+    "all": lambda: all_sessions(),
+    "context": lambda query: session_context(query),
+    "current": lambda agent, cwd: current_session(agent, cwd),
+    "digest": lambda agent, path, start="0": digest(agent, path, int(start)),
+}
+
+
+def main(argv):
+    if not argv or argv[0] not in COMMANDS:
+        raise SystemExit("usage: digest.py {%s} ..." % ",".join(COMMANDS))
+    out = COMMANDS[argv[0]](*argv[1:])
     sys.stdout.write(json.dumps(out, ensure_ascii=False))
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

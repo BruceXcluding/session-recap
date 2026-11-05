@@ -18,9 +18,22 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test tests/cli.test.mjs && python3 -m unittest discover -s tests -p 'test_*.py'"
+    "test": "node --test tests/cli.test.mjs && python3 -m unittest discover -s tests -p 'test_*.py'",
+    "test:plugin": "claude plugin validate . && claude plugin test .",
+    "typecheck": "tsc -p tsconfig.cli.json",
+    "lint": "prettier --check . && ruff check hooks tests && ruff format --check hooks tests",
+    "format": "prettier --write . && ruff format hooks tests"
   },
-  "keywords": ["claude-code", "codex", "opencode", "dsh", "session", "recap", "summary", "cli"],
+  "keywords": [
+    "claude-code",
+    "codex",
+    "opencode",
+    "dsh",
+    "session",
+    "recap",
+    "summary",
+    "cli"
+  ],
   "author": "BruceXcluding",
   "license": "MIT",
   "homepage": "https://github.com/BruceXcluding/session-recap",
@@ -28,5 +41,10 @@
     "type": "git",
     "url": "git+https://github.com/BruceXcluding/session-recap.git"
   },
-  "bugs": "https://github.com/BruceXcluding/session-recap/issues"
+  "bugs": "https://github.com/BruceXcluding/session-recap/issues",
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prettier": "3.4.2",
+    "typescript": "5.6.3"
+  }
 }

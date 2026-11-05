@@ -11,15 +11,78 @@ import { fileURLToPath } from 'node:url'
 
 import { CHUNK_CHARS, splitParts, writeRecap } from '../core/recap.mjs'
 
+/** @typedef {import('../core/recap.mjs').CompleteRequest} CompleteRequest */
+/** @typedef {import('../core/recap.mjs').Digest} Digest */
+/** @typedef {import('../core/recap.mjs').NoteCache} NoteCache */
+/** @typedef {import('../core/recap.mjs').Progress} Progress */
+/** @typedef {'claude' | 'codex' | 'dsh' | 'opencode'} Agent */
+
+/**
+ * A session as digest.py lists it.
+ * @typedef {object} Session
+ * @property {Agent} agent
+ * @property {string} id
+ * @property {string} path
+ * @property {string} cwd
+ * @property {string} title
+ * @property {number} size
+ * @property {number} mtimeMs
+ */
+
+/** @typedef {{ cwd: string, sessions: number, mtimeMs: number, agents: Record<string, number> }} Project */
+
+/**
+ * @typedef {object} Options
+ * @property {string[]} words
+ * @property {string} [command]
+ * @property {string} [agent]
+ * @property {string} [model]
+ * @property {string} [partModel]
+ * @property {boolean} [refresh]
+ * @property {boolean} [dryRun]
+ * @property {boolean} [json]
+ * @property {boolean} [help]
+ * @property {boolean} [version]
+ */
+
+/**
+ * @typedef {object} ModelConfig
+ * @property {string} [api] `anthropic`, else OpenAI-compatible
+ * @property {string} [baseUrl]
+ * @property {string} [apiKey]
+ * @property {boolean} [bearer] send the key as a bearer token (ANTHROPIC_AUTH_TOKEN)
+ * @property {string} [model]
+ * @property {string} [partModel]
+ * @property {string} [source] where the settings came from, for `config`
+ */
+
+/** @typedef {{ calls: number, input: number, output: number }} Usage */
+/** @typedef {{ size: number, mtimeMs: number, at: number, prompts?: number, markdown: string }} CachedRecap */
+
+/**
+ * The part of `fetch` this uses, so tests can stand in for it.
+ * @typedef {(url: string, init: { method: string, headers: Record<string, string>, body: string }) =>
+ *   Promise<{ ok: boolean, status: number, text: () => Promise<string> }>} Fetch
+ */
+
+/**
+ * @typedef {{ ok: true, text: string, input: number, output: number }
+ *   | { ok: false, status: number, error: string }} CallResult
+ */
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DIGEST = join(ROOT, 'hooks', 'digest.py')
 const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version
+/** @type {Agent[]} */
 const AGENTS = ['claude', 'codex', 'dsh', 'opencode']
+/** @type {Record<string, string>} */
 const LABEL = { claude: 'Claude Code', codex: 'Codex', dsh: 'dsh', opencode: 'OpenCode' }
+const COMMANDS = ['list', 'projects', 'install', 'config', 'recap']
 const PARALLEL = 4
+const RETRIES = 2
 
 // `session-recap list | head` closes the pipe early: that is not an error.
-process.stdout.on('error', err => {
+process.stdout.on('error', (/** @type {NodeJS.ErrnoException} */ err) => {
   if (err.code === 'EPIPE') process.exit(0)
   throw err
 })
@@ -49,15 +112,16 @@ DEEPSEEK_API_KEY, or OPENAI_API_KEY, whichever is set.`
 
 // ---------------------------------------------------------------- arguments
 
+/**
+ * @param {string[]} argv
+ * @returns {Options}
+ */
 function parseArgs(argv) {
+  /** @type {Options} */
   const opts = { words: [] }
   for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]
-    const value = () => {
-      const v = argv[++i]
-      if (v === undefined) fail(`${a} needs a value`)
-      return v
-    }
+    const a = argv[i] ?? ''
+    const value = () => argv[++i] ?? fail(`${a} needs a value`)
     if (a === '--agent') opts.agent = value()
     else if (a === '--model') opts.model = value()
     else if (a === '--part-model') opts.partModel = value()
@@ -69,12 +133,16 @@ function parseArgs(argv) {
     else if (a.startsWith('--')) fail(`unknown option ${a}`)
     else opts.words.push(a)
   }
-  const commands = ['list', 'projects', 'install', 'config', 'recap']
-  opts.command = commands.includes(opts.words[0]) ? opts.words.shift() : 'recap'
+  opts.command = COMMANDS.includes(opts.words[0] ?? '') ? opts.words.shift() : 'recap'
 
   return opts
 }
 
+/**
+ * @param {string} message
+ * @param {number} [code]
+ * @returns {never}
+ */
 function fail(message, code = 1) {
   process.stderr.write(`session-recap: ${message}\n`)
   process.exit(code)
@@ -82,6 +150,11 @@ function fail(message, code = 1) {
 
 // ---------------------------------------------------------------- digest.py
 
+/**
+ * Runs hooks/digest.py and parses what it prints.
+ * @param {string[]} args
+ * @returns {any}
+ */
 export function python(args) {
   const tries = process.platform === 'win32' ? ['python', 'py'] : ['python3', '/usr/bin/python3']
   let last = ''
@@ -101,32 +174,46 @@ export function python(args) {
 // an agent keeps its files, not that this runs inside it.
 const SETTINGS_VARS = new Set(['CODEX_HOME', 'DSH_HOME'])
 
-// The agent this runs inside, from the markers each one sets for its tools.
+/**
+ * The agent this runs inside, from the markers each one sets for its tools.
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {Agent | 'any'}
+ */
 export function detectAgent(env = process.env) {
-  const set = prefix => Object.keys(env).some(k => k.startsWith(prefix) && !SETTINGS_VARS.has(k))
+  const has = (/** @type {string} */ prefix) =>
+    Object.keys(env).some(k => k.startsWith(prefix) && !SETTINGS_VARS.has(k))
   if (env.CLAUDECODE === '1') return 'claude'
-  if (set('CODEX_')) return 'codex'
+  if (has('CODEX_')) return 'codex'
   if (env.OPENCODE !== undefined || env.OPENCODE_BIN_PATH !== undefined) return 'opencode'
-  if (set('DSH_')) return 'dsh'
+  if (has('DSH_')) return 'dsh'
   return 'any'
 }
 
+/**
+ * The session to recap: the one the words name, else the newest one here.
+ * @param {Options} opts
+ * @returns {Session}
+ */
 function pickSession(opts) {
   const agent = opts.agent === undefined || opts.agent === 'auto' ? detectAgent() : opts.agent
-  if (agent !== 'any' && !AGENTS.includes(agent)) fail(`unknown agent "${agent}" (${AGENTS.join(', ')})`)
+  if (agent !== 'any' && !AGENTS.includes(/** @type {Agent} */ (agent))) {
+    fail(`unknown agent "${agent}" (${AGENTS.join(', ')})`)
+  }
   if (opts.words.length === 0) {
+    /** @type {Session | null} */
     const row = python(['current', agent, process.cwd()])
-    if (row === null) fail(`no ${agent === 'any' ? '' : `${LABEL[agent]} `}session found in ${process.cwd()} or above it`)
-    return row
+    return row ?? fail(`no ${agent === 'any' ? '' : `${LABEL[agent]} `}session found in ${process.cwd()} or above it`)
   }
   const query = opts.words.join(' ')
-  const rows = python(['find', query]).filter(r => agent === 'any' || r.agent === agent)
-  if (rows.length === 0) fail(`no session matches "${query}"; try: session-recap list`)
-  if (rows.length > 1) {
+  /** @type {Session[]} */
+  const rows = python(['find', query]).filter((/** @type {Session} */ r) => agent === 'any' || r.agent === agent)
+  const [first, ...others] = rows
+  if (first === undefined) return fail(`no session matches "${query}"; try: session-recap list`)
+  if (others.length > 0) {
     process.stderr.write(`${rows.length} sessions match; recapping the newest. Others:\n`)
-    for (const r of rows.slice(1, 6)) process.stderr.write(`  ${LABEL[r.agent]} · ${r.title} (${r.id})\n`)
+    for (const r of others.slice(0, 5)) process.stderr.write(`  ${LABEL[r.agent]} · ${r.title} (${r.id})\n`)
   }
-  return rows[0]
+  return first
 }
 
 // ---------------------------------------------------------------- config
@@ -136,11 +223,22 @@ function configPath() {
   return join(base, 'session-recap', 'config.json')
 }
 
+/**
+ * The model settings: session-recap's own (flags, environment, config file),
+ * else those of a provider whose key is in the environment.
+ * @param {{ model?: string, partModel?: string }} [opts]
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {ModelConfig}
+ */
 export function modelConfig(opts = {}, env = process.env) {
+  /** @type {Record<string, string | undefined>} */
   let file = {}
   try {
     file = JSON.parse(readFileSync(configPath(), 'utf8'))
-  } catch {}
+  } catch {
+    // No config file, or one that is not JSON: flags and environment only.
+  }
+  /** @type {(flag: string | undefined, envName: string, fileName: string) => string | undefined} */
   const pick = (flag, envName, fileName) => flag ?? env[envName] ?? file[fileName]
   const explicit = {
     api: pick(undefined, 'SESSION_RECAP_API', 'api'),
@@ -149,9 +247,28 @@ export function modelConfig(opts = {}, env = process.env) {
     model: pick(opts.model, 'SESSION_RECAP_MODEL', 'model'),
     partModel: pick(opts.partModel, 'SESSION_RECAP_PART_MODEL', 'partModel'),
   }
-  let auto = {}
+  // A key or base URL of session-recap's own starts a provider of its own;
+  // without one, only the model names apply on top of the detected provider,
+  // so its protocol, endpoint and key stay together.
+  const isExplicit = explicit.apiKey !== undefined || explicit.baseUrl !== undefined
+  /** @type {ModelConfig} */
+  const merged = isExplicit ? { api: 'openai', source: 'session-recap settings' } : detectedProvider(env)
+  /** @type {(keyof typeof explicit)[]} */
+  const applies = isExplicit ? ['api', 'baseUrl', 'apiKey', 'model', 'partModel'] : ['model', 'partModel']
+  for (const k of applies) if (explicit[k] !== undefined) merged[k] = explicit[k]
+  merged.partModel = merged.partModel || merged.model
+
+  return merged
+}
+
+/**
+ * The provider whose key is in the environment, first found wins.
+ * @param {Record<string, string | undefined>} env
+ * @returns {ModelConfig}
+ */
+function detectedProvider(env) {
   if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN) {
-    auto = {
+    return {
       api: 'anthropic',
       baseUrl: env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
       apiKey: env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN,
@@ -160,16 +277,18 @@ export function modelConfig(opts = {}, env = process.env) {
       partModel: env.ANTHROPIC_DEFAULT_HAIKU_MODEL || 'claude-haiku-5-5',
       source: 'ANTHROPIC_* environment',
     }
-  } else if (env.DEEPSEEK_API_KEY) {
-    auto = {
+  }
+  if (env.DEEPSEEK_API_KEY) {
+    return {
       api: 'openai',
       baseUrl: 'https://api.deepseek.com',
       apiKey: env.DEEPSEEK_API_KEY,
       model: 'deepseek-chat',
       source: 'DEEPSEEK_API_KEY',
     }
-  } else if (env.OPENAI_API_KEY) {
-    auto = {
+  }
+  if (env.OPENAI_API_KEY) {
+    return {
       api: 'openai',
       baseUrl: env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
       apiKey: env.OPENAI_API_KEY,
@@ -177,46 +296,46 @@ export function modelConfig(opts = {}, env = process.env) {
       source: 'OPENAI_API_KEY',
     }
   }
-  // A key or base URL of session-recap's own starts a provider of its own;
-  // without one, only the model names apply on top of the detected provider,
-  // so its protocol, endpoint and key stay together.
-  const isExplicit = explicit.apiKey !== undefined || explicit.baseUrl !== undefined
-  const base = isExplicit ? { api: 'openai', source: 'session-recap settings' } : auto
-  const merged = { ...base }
-  const applies = isExplicit ? Object.keys(explicit) : ['model', 'partModel']
-  for (const k of applies) if (explicit[k] !== undefined) merged[k] = explicit[k]
-  merged.partModel = merged.partModel || merged.model
-
-  return merged
+  return {}
 }
 
+/** @param {string | undefined} key */
 function masked(key) {
   return key ? `${key.slice(0, 4)}…${key.slice(-4)} (${key.length} chars)` : '(none)'
 }
 
 // ---------------------------------------------------------------- model calls
 
-export function makeComplete(config, usage, fetchImpl = globalThis.fetch) {
+/**
+ * One model call per request, at most PARALLEL at once, retrying 429 and 5xx.
+ * @param {ModelConfig} config
+ * @param {Usage} usage counts calls and tokens as they come back
+ * @param {Fetch} [fetchImpl]
+ * @returns {(request: CompleteRequest) => Promise<string>}
+ */
+export function makeComplete(config, usage, fetchImpl = /** @type {Fetch} */ (/** @type {unknown} */ (fetch))) {
   let running = 0
-  const queue = []
-  const slot = () =>
+  /** @type {(() => void)[]} */
+  const waiting = []
+  /** @returns {Promise<void>} */
+  const acquire = () =>
     new Promise(go => {
       const tryGo = () => {
         if (running < PARALLEL) {
           running += 1
           go()
-        } else queue.push(tryGo)
+        } else waiting.push(tryGo)
       }
       tryGo()
     })
   const release = () => {
     running -= 1
-    queue.shift()?.()
+    waiting.shift()?.()
   }
 
   return async ({ stage, system, prompt, maxTokens }) => {
-    const model = stage === 'part' ? config.partModel : config.model
-    await slot()
+    const model = (stage === 'part' ? config.partModel : config.model) ?? ''
+    await acquire()
     try {
       for (let attempt = 0; ; attempt++) {
         const r = await call(config, model, system, prompt, maxTokens, fetchImpl)
@@ -226,8 +345,8 @@ export function makeComplete(config, usage, fetchImpl = globalThis.fetch) {
           usage.output += r.output
           return r.text
         }
-        const retry = r.status === 429 || r.status >= 500
-        if (!retry || attempt >= 2) throw new Error(`${model}: HTTP ${r.status} ${r.error}`)
+        const isRetryable = r.status === 429 || r.status >= 500
+        if (!isRetryable || attempt >= RETRIES) throw new Error(`${model}: HTTP ${r.status} ${r.error}`)
         await new Promise(done => setTimeout(done, 2000 * (attempt + 1)))
       }
     } finally {
@@ -236,35 +355,51 @@ export function makeComplete(config, usage, fetchImpl = globalThis.fetch) {
   }
 }
 
+/**
+ * @param {ModelConfig} config
+ * @param {string} model
+ * @param {string} system
+ * @param {string} prompt
+ * @param {number} maxTokens
+ * @param {Fetch} fetchImpl
+ * @returns {Promise<CallResult>}
+ */
 async function call(config, model, system, prompt, maxTokens, fetchImpl) {
-  const base = config.baseUrl.replace(/\/+$/, '')
-  let res
-  if (config.api === 'anthropic') {
-    const auth = config.bearer ? { authorization: `Bearer ${config.apiKey}` } : { 'x-api-key': config.apiKey }
-    res = await fetchImpl(`${base}/v1/messages`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', ...auth },
-      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: prompt }] }),
-    })
-  } else {
-    res = await fetchImpl(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.apiKey}` },
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: prompt },
-        ],
-      }),
-    })
-  }
+  const base = (config.baseUrl ?? '').replace(/\/+$/, '')
+  const key = config.apiKey ?? ''
+  const isAnthropic = config.api === 'anthropic'
+  const res = isAnthropic
+    ? await fetchImpl(`${base}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          ...(config.bearer ? { authorization: `Bearer ${key}` } : { 'x-api-key': key }),
+        },
+        body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: prompt }] }),
+      })
+    : await fetchImpl(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: prompt },
+          ],
+        }),
+      })
   const body = await res.text()
   if (!res.ok) return { ok: false, status: res.status, error: body.slice(0, 300) }
   const data = JSON.parse(body)
-  if (config.api === 'anthropic') {
-    const text = (data.content ?? []).filter(b => b.type === 'text').map(b => b.text).join('')
+  if (isAnthropic) {
+    /** @type {{ type: string, text?: string }[]} */
+    const blocks = data.content ?? []
+    const text = blocks
+      .filter(b => b.type === 'text')
+      .map(b => b.text ?? '')
+      .join('')
     return { ok: true, text, input: data.usage?.input_tokens ?? 0, output: data.usage?.output_tokens ?? 0 }
   }
   const text = data.choices?.[0]?.message?.content ?? ''
@@ -273,6 +408,7 @@ async function call(config, model, system, prompt, maxTokens, fetchImpl) {
 
 // ---------------------------------------------------------------- caches
 
+/** @param {...string} parts */
 function cacheDir(...parts) {
   const base = process.env.XDG_CACHE_HOME || join(homedir(), '.cache')
   const dir = join(base, 'session-recap', ...parts)
@@ -280,6 +416,10 @@ function cacheDir(...parts) {
   return dir
 }
 
+/**
+ * @param {string} path
+ * @returns {any}
+ */
 function readJson(path) {
   try {
     return JSON.parse(readFileSync(path, 'utf8'))
@@ -288,6 +428,7 @@ function readJson(path) {
   }
 }
 
+/** Part notes as files, one per content hash. @type {NoteCache} */
 const noteFiles = {
   get: key => {
     const path = join(cacheDir('notes'), `${key}.txt`)
@@ -296,12 +437,16 @@ const noteFiles = {
   set: (key, note) => writeFileSync(join(cacheDir('notes'), `${key}.txt`), note),
 }
 
-// Characters to tokens: about one token per CJK character, four characters per token otherwise.
+/**
+ * Characters to tokens: about one token per CJK character, four characters per token otherwise.
+ * @param {string} text
+ */
 export function estimateTokens(text) {
-  const cjk = (text.match(/[　-鿿가-힯＀-￯]/g) ?? []).length
+  const cjk = (text.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) ?? []).length
   return Math.round(cjk + (text.length - cjk) / 4)
 }
 
+/** @param {number} ms */
 function ago(ms) {
   const min = Math.round((Date.now() - ms) / 60_000)
   if (min < 60) return `${Math.max(0, min)}m ago`
@@ -311,34 +456,33 @@ function ago(ms) {
 
 // ---------------------------------------------------------------- commands
 
+/** @param {Options} opts */
 async function recap(opts) {
   const session = pickSession(opts)
   const cachePath = join(cacheDir('recaps'), `${session.agent}-${session.id.replace(/[^\w.-]/g, '_')}.json`)
+  /** @type {CachedRecap | undefined} */
   const previous = opts.refresh ? undefined : readJson(cachePath)
   const isFresh = previous !== undefined && previous.size === session.size && previous.mtimeMs === session.mtimeMs
+  // A recap that knows how many prompts it covers is brought up to date from there.
   const from = previous?.prompts !== undefined && !isFresh ? previous.prompts : 0
+  /** @type {Usage} */
   const usage = { calls: 0, input: 0, output: 0 }
-  let markdown = previous?.markdown
+  let markdown = previous?.markdown ?? ''
 
   if (!isFresh) {
+    /** @type {Digest} */
     const digest = python(['digest', session.agent, session.path, String(from)])
-    if (opts.dryRun) {
-      const parts = splitParts(digest.text, CHUNK_CHARS)
-      const tokens = estimateTokens(digest.text)
-      const report = {
-        session: `${LABEL[session.agent]} · ${session.title}`,
-        mode: from > 0 ? `update from prompt ${from + 1}` : 'full recap',
-        prompts: digest.prompts,
-        characters: digest.text.length,
-        estimatedInputTokens: tokens,
-        modelCalls: parts.length > 1 ? parts.length + 1 : 1,
-      }
-      process.stdout.write(opts.json ? `${JSON.stringify(report)}\n` : `${Object.entries(report).map(([k, v]) => `${k}: ${v}`).join('\n')}\n`)
-      return
-    }
+    if (opts.dryRun) return printDryRun(opts, session, digest, from)
     const config = modelConfig(opts)
-    if (!config.apiKey || !config.baseUrl) fail('no model configured. Set SESSION_RECAP_API_KEY (and SESSION_RECAP_BASE_URL, SESSION_RECAP_MODEL), or ANTHROPIC_API_KEY, DEEPSEEK_API_KEY or OPENAI_API_KEY. See: session-recap --help', 2)
+    if (!config.apiKey || !config.baseUrl) {
+      fail(
+        'no model configured. Set SESSION_RECAP_API_KEY (and SESSION_RECAP_BASE_URL, SESSION_RECAP_MODEL), ' +
+          'or ANTHROPIC_API_KEY, DEEPSEEK_API_KEY or OPENAI_API_KEY. See: session-recap --help',
+        2,
+      )
+    }
     if (!config.model) fail('no model name: set SESSION_RECAP_MODEL or pass --model', 2)
+    /** @param {Progress} p */
     const progress = ({ step, done, total }) => {
       if (process.stderr.isTTY) process.stderr.write(`\r\x1b[2K${total ? `[${done}/${total}] ` : ''}${step}…`)
     }
@@ -350,38 +494,78 @@ async function recap(opts) {
       progress,
     })
     if (process.stderr.isTTY) process.stderr.write('\r\x1b[2K')
-    writeFileSync(
-      cachePath,
-      JSON.stringify({ size: session.size, mtimeMs: session.mtimeMs, at: Date.now(), prompts: digest.prompts, markdown }),
-    )
+    /** @type {CachedRecap} */
+    const saved = { size: session.size, mtimeMs: session.mtimeMs, at: Date.now(), prompts: digest.prompts, markdown }
+    writeFileSync(cachePath, JSON.stringify(saved))
   }
 
   if (opts.json) {
     process.stdout.write(`${JSON.stringify({ session, markdown, cached: isFresh, usage })}\n`)
     return
   }
-  const meta = [LABEL[session.agent], session.cwd, `active ${ago(session.mtimeMs)}`, isFresh ? 'cached recap' : 'new recap']
+  const meta = [
+    LABEL[session.agent],
+    session.cwd,
+    `active ${ago(session.mtimeMs)}`,
+    isFresh ? 'cached recap' : 'new recap',
+  ]
   process.stdout.write(`# ${session.title}\n\n> ${meta.join(' · ')}\n\n${markdown.trim()}\n`)
   if (usage.calls > 0) {
-    process.stderr.write(`\n${usage.calls} model call${usage.calls === 1 ? '' : 's'} · ${usage.input} input / ${usage.output} output tokens${from > 0 ? ` · updated from prompt ${from + 1}` : ''}\n`)
+    const calls = `${usage.calls} model call${usage.calls === 1 ? '' : 's'}`
+    const update = from > 0 ? ` · updated from prompt ${from + 1}` : ''
+    process.stderr.write(`\n${calls} · ${usage.input} input / ${usage.output} output tokens${update}\n`)
   }
 }
 
+/**
+ * What a recap would send, without sending it.
+ * @param {Options} opts
+ * @param {Session} session
+ * @param {Digest} digest
+ * @param {number} from
+ */
+function printDryRun(opts, session, digest, from) {
+  const parts = splitParts(digest.text, CHUNK_CHARS)
+  const report = {
+    session: `${LABEL[session.agent]} · ${session.title}`,
+    mode: from > 0 ? `update from prompt ${from + 1}` : 'full recap',
+    prompts: digest.prompts,
+    characters: digest.text.length,
+    estimatedInputTokens: estimateTokens(digest.text),
+    modelCalls: parts.length > 1 ? parts.length + 1 : 1,
+  }
+  const text = opts.json
+    ? JSON.stringify(report)
+    : Object.entries(report)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join('\n')
+  process.stdout.write(`${text}\n`)
+}
+
+/** @param {Options} opts */
 function list(opts) {
   const agent = opts.agent && opts.agent !== 'auto' ? opts.agent : 'any'
   const query = opts.words.join(' ')
-  const rows = python(query ? ['find', query] : ['all']).filter(r => agent === 'any' || r.agent === agent)
+  /** @type {Session[]} */
+  const rows = python(query ? ['find', query] : ['all']).filter(
+    (/** @type {Session} */ r) => agent === 'any' || r.agent === agent,
+  )
   if (opts.json) return process.stdout.write(`${JSON.stringify(rows)}\n`)
   for (const r of rows) {
-    process.stdout.write(`${LABEL[r.agent].padEnd(11)} ${ago(r.mtimeMs).padStart(8)}  ${r.title}\n${' '.repeat(22)}${r.cwd}  (${r.id})\n`)
+    const label = (LABEL[r.agent] ?? r.agent).padEnd(11)
+    process.stdout.write(`${label} ${ago(r.mtimeMs).padStart(8)}  ${r.title}\n${' '.repeat(22)}${r.cwd}  (${r.id})\n`)
   }
 }
 
+/** @param {Options} opts */
 function projects(opts) {
+  /** @type {Project[]} */
   const rows = python(['projects'])
   if (opts.json) return process.stdout.write(`${JSON.stringify(rows)}\n`)
   for (const p of rows) {
-    const agents = Object.entries(p.agents).map(([a, n]) => `${LABEL[a]} ${n}`).join(' · ')
+    const agents = Object.entries(p.agents)
+      .map(([a, n]) => `${LABEL[a] ?? a} ${n}`)
+      .join(' · ')
     process.stdout.write(`${p.cwd}\n  ${agents} · ${ago(p.mtimeMs)}\n`)
   }
 }
@@ -390,6 +574,11 @@ function projects(opts) {
 // skill names this install's full command as well.
 const FULL_COMMAND = `"${process.execPath}" "${fileURLToPath(import.meta.url)}"`
 
+/**
+ * The SKILL.md that tells an agent how to run session-recap.
+ * @param {Agent | 'any'} agent
+ * @param {string} [full] the command by its full path
+ */
 export function skillText(agent, full = FULL_COMMAND) {
   const flag = agent === 'any' ? '' : ` --agent ${agent}`
   return `---
@@ -417,20 +606,27 @@ description: Recap an AI coding session - its intent, key decisions, what change
 `
 }
 
+/** @param {Options} opts */
 function install(opts) {
   const home = homedir()
+  const codexHome = process.env.CODEX_HOME || join(home, '.codex')
+  /** @type {{ name: string, agent: Agent | 'any', dir: string, when: string }[]} */
   const targets = [
-    { agent: 'codex', dir: join(process.env.CODEX_HOME || join(home, '.codex'), 'skills'), when: join(home, '.codex') },
-    { agent: 'opencode', dir: join(home, '.config', 'opencode', 'skills'), when: join(home, '.config', 'opencode') },
+    { name: 'codex', agent: 'codex', dir: join(codexHome, 'skills'), when: codexHome },
+    {
+      name: 'opencode',
+      agent: 'opencode',
+      dir: join(home, '.config', 'opencode', 'skills'),
+      when: join(home, '.config', 'opencode'),
+    },
     // The shared skills folder several agents read (dsh among them where it supports skills).
-    { agent: 'any', dir: join(home, '.agents', 'skills'), when: home },
+    { name: 'agents', agent: 'any', dir: join(home, '.agents', 'skills'), when: home },
   ]
   const wanted = opts.words.length > 0 ? opts.words : null
   for (const t of targets) {
-    const name = t.agent === 'any' ? 'agents' : t.agent
-    if (wanted && !wanted.includes(name)) continue
+    if (wanted && !wanted.includes(t.name)) continue
     if (!existsSync(t.when)) {
-      process.stdout.write(`skip ${name}: ${t.when} not found\n`)
+      process.stdout.write(`skip ${t.name}: ${t.when} not found\n`)
       continue
     }
     const dir = join(t.dir, 'session-recap')
@@ -438,24 +634,28 @@ function install(opts) {
     writeFileSync(join(dir, 'SKILL.md'), skillText(t.agent))
     process.stdout.write(`installed ${join(dir, 'SKILL.md')}\n`)
   }
-  process.stdout.write('Claude Code: install the plugin instead: /plugin install session-recap --marketplace BruceXcluding/session-recap\n')
+  process.stdout.write(
+    'Claude Code: install the plugin instead: /plugin install session-recap --marketplace BruceXcluding/session-recap\n',
+  )
 }
 
+/** @param {Options} opts */
 function showConfig(opts) {
   const c = modelConfig(opts)
   const lines = [
-    `source:     ${c.source ?? '(none)'}`,
-    `api:        ${c.api ?? '(none)'}`,
-    `base URL:   ${c.baseUrl ?? '(none)'}`,
-    `API key:    ${masked(c.apiKey)}`,
-    `model:      ${c.model ?? '(none)'}`,
-    `part model: ${c.partModel ?? '(none)'}`,
+    `source:      ${c.source ?? '(none)'}`,
+    `api:         ${c.api ?? '(none)'}`,
+    `base URL:    ${c.baseUrl ?? '(none)'}`,
+    `API key:     ${masked(c.apiKey)}`,
+    `model:       ${c.model ?? '(none)'}`,
+    `part model:  ${c.partModel ?? '(none)'}`,
     `config file: ${configPath()}${existsSync(configPath()) ? '' : ' (not present)'}`,
-    `agent here: ${detectAgent()}`,
+    `agent here:  ${detectAgent()}`,
   ]
   process.stdout.write(`${lines.join('\n')}\n`)
 }
 
+/** @param {string[]} argv */
 export async function main(argv) {
   const opts = parseArgs(argv)
   if (opts.help) return process.stdout.write(`${HELP}\n`)
@@ -469,5 +669,5 @@ export async function main(argv) {
 
 // Run as a command (npm links the bin, so compare real paths), not when imported by tests.
 if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
-  main(process.argv.slice(2)).catch(err => fail(err.message))
+  main(process.argv.slice(2)).catch(err => fail(err instanceof Error ? err.message : String(err)))
 }

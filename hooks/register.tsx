@@ -25,9 +25,13 @@ const view = atom(
   { screen: 'projects', projects: [], sessions: [] },
   { shape: 'view-3' },
 )
-const jobs = atom({ plugin: 'session-recap', key: 'jobs' } as const, {}, {
-  shape: 'jobs-3',
-})
+const jobs = atom(
+  { plugin: 'session-recap', key: 'jobs' } as const,
+  {},
+  {
+    shape: 'jobs-3',
+  },
+)
 
 type SectionKey = 'intent' | 'ideas' | 'changed' | 'open' | 'resume'
 // The recap's headings, in the order RECAP_FORMAT asks for them; a model
@@ -56,7 +60,10 @@ function sectionsOf(markdown: string): Partial<Record<SectionKey, string>> {
 
 function oneLine(text: string | undefined, max: number): string | undefined {
   if (text === undefined) return undefined
-  const line = text.replace(/[*_`#>]/g, '').replace(/\s+/g, ' ').trim()
+  const line = text
+    .replace(/[*_`#>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`
 }
@@ -179,7 +186,10 @@ async function prune($: EngineInterface): Promise<void> {
         .filter(k => k.startsWith(prefix))
         .map(async k => ({ k, at: Number(((await $.store.get(k)) as { at?: number } | undefined)?.at ?? 0) })),
     )
-  for (const [prefix, kept] of [['recap:', RECAPS_KEPT], ['note:', NOTES_KEPT]] as const) {
+  for (const [prefix, kept] of [
+    ['recap:', RECAPS_KEPT],
+    ['note:', NOTES_KEPT],
+  ] as const) {
     const rows = (await dated(prefix)).sort((a, b) => b.at - a.at)
     for (const { k } of rows.slice(kept)) await $.store.delete(k)
   }
@@ -360,7 +370,9 @@ export const register: Register = (on, options) => {
     const errorCard = (onRetry?: () => void) =>
       v.error !== undefined && (
         <Box flexDirection="column" gap="xs" borderStyle="round" borderColor="error" paddingX={1}>
-          <Text color="error" weight="semibold">Something went wrong</Text>
+          <Text color="error" weight="semibold">
+            Something went wrong
+          </Text>
           <Text color="error">{v.error}</Text>
           {onRetry !== undefined && (
             <Button key="retry" onPress={onRetry}>
@@ -379,7 +391,9 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="column">
-            <Text size="heading" weight="bold">Projects</Text>
+            <Text size="heading" weight="bold">
+              Projects
+            </Text>
             <Text dimColor size="footnote">
               Sessions from Claude Code, Codex, dsh and OpenCode, by project folder, newest first.
             </Text>
@@ -418,14 +432,20 @@ export const register: Register = (on, options) => {
             ‹ All projects
           </Button>
           <Box flexDirection="column">
-            <Text size="heading" weight="bold">{baseName(v.project?.cwd ?? '')}</Text>
+            <Text size="heading" weight="bold">
+              {baseName(v.project?.cwd ?? '')}
+            </Text>
             <Text dimColor size="footnote">
               {v.sessions.length} sessions · {recapped} recapped
             </Text>
           </Box>
           {agents.length > 1 && (
             <Box flexDirection="row" gap="sm" flexWrap="wrap">
-              <Button key="agent-all" variant={v.agent === undefined ? 'primary' : 'secondary'} onPress={filter(undefined)}>
+              <Button
+                key="agent-all"
+                variant={v.agent === undefined ? 'primary' : 'secondary'}
+                onPress={filter(undefined)}
+              >
                 All
               </Button>
               {agents.map(agent => (
@@ -444,9 +464,13 @@ export const register: Register = (on, options) => {
             {shown.map(s => {
               const job = running[keyOf(s)]
               const mark =
-                s.recap === 'fresh' ? <Text color="success">●</Text>
-                : s.recap === 'stale' ? <Text color="warning">◐</Text>
-                : <Text dimColor>○</Text>
+                s.recap === 'fresh' ? (
+                  <Text color="success">●</Text>
+                ) : s.recap === 'stale' ? (
+                  <Text color="warning">◐</Text>
+                ) : (
+                  <Text dimColor>○</Text>
+                )
 
               return (
                 <Box flexDirection="column">
@@ -458,15 +482,23 @@ export const register: Register = (on, options) => {
                     </Text>
                   </Button>
                   {job !== undefined ? (
-                    <Text color="warning" size="footnote">  {progress(job)}</Text>
+                    <Text color="warning" size="footnote">
+                      {' '}
+                      {progress(job)}
+                    </Text>
                   ) : s.intent !== undefined ? (
-                    <Text dimColor size="footnote">  {s.intent}</Text>
+                    <Text dimColor size="footnote">
+                      {' '}
+                      {s.intent}
+                    </Text>
                   ) : null}
                 </Box>
               )
             })}
           </Box>
-          <Text dimColor size="caption">● recap ready  ◐ session changed since  ○ no recap yet</Text>
+          <Text dimColor size="caption">
+            ● recap ready ◐ session changed since ○ no recap yet
+          </Text>
         </Box>
       )
     }
@@ -489,12 +521,20 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" gap={1}>
         <Box flexDirection="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap="sm">
-          <Button key="to-sessions" plain dimColor onPress={() => void (v.project ? showSessions($, v.project) : showProjects($))}>
+          <Button
+            key="to-sessions"
+            plain
+            dimColor
+            onPress={() => void (v.project ? showSessions($, v.project) : showProjects($))}
+          >
             ‹ Sessions
           </Button>
           {recap !== undefined && (
             <Box flexDirection="row" gap="sm">
-              <Button key="copy" onPress={pressed => void $.ui.copy({ text: recap.markdown, surface: pressed.surface })}>
+              <Button
+                key="copy"
+                onPress={pressed => void $.ui.copy({ text: recap.markdown, surface: pressed.surface })}
+              >
                 Copy
               </Button>
               {job === undefined && (
@@ -507,7 +547,9 @@ export const register: Register = (on, options) => {
         </Box>
 
         <Box flexDirection="column">
-          <Text size="title" weight="bold">{s.title}</Text>
+          <Text size="title" weight="bold">
+            {s.title}
+          </Text>
           <Text dimColor size="footnote">
             {AGENT_LABEL[s.agent] ?? s.agent} · {baseName(s.cwd)} · {megabytes(s.size)} · active {ago(s.mtimeMs)}
             {recap ? ` · recap from ${ago(recap.at)}` : ''}
@@ -516,7 +558,9 @@ export const register: Register = (on, options) => {
 
         {job !== undefined && (
           <Box flexDirection="column" gap="xs" borderStyle="round" borderColor="warning" paddingX={1}>
-            <Text color="warning" weight="semibold">Writing the recap</Text>
+            <Text color="warning" weight="semibold">
+              Writing the recap
+            </Text>
             <Text>{progress(job)}</Text>
           </Box>
         )}
@@ -544,12 +588,16 @@ export const register: Register = (on, options) => {
         {recap !== undefined && isStructured && (
           <Box flexDirection="column" gap={1}>
             <Box flexDirection="column" gap="xs" borderStyle="round" borderColor="claude" paddingX={1}>
-              <Text color="claude" size="caption" weight="bold">INTENT</Text>
+              <Text color="claude" size="caption" weight="bold">
+                INTENT
+              </Text>
               <Markdown text={parts.intent ?? ''} />
             </Box>
             {parts.resume !== undefined && (
               <Box flexDirection="column" gap="xs" borderStyle="round" borderColor="success" paddingX={1}>
-                <Text color="success" size="caption" weight="bold">WHERE TO RESUME</Text>
+                <Text color="success" size="caption" weight="bold">
+                  WHERE TO RESUME
+                </Text>
                 <Markdown text={parts.resume} />
               </Box>
             )}

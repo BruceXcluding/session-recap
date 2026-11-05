@@ -66,7 +66,8 @@ function digestOf(turns: number, from = 0) {
 // digest.py's `context`: the session matching the query (id, else title) and its project.
 function context(query: string) {
   const q = query.toLowerCase()
-  const hit = [SESSION, OTHER].find(s => s.id === q) ?? [SESSION, OTHER].find(s => s.title.toLowerCase().includes(q)) ?? null
+  const hit =
+    [SESSION, OTHER].find(s => s.id === q) ?? [SESSION, OTHER].find(s => s.title.toLowerCase().includes(q)) ?? null
   return { projects: [PROJECT], session: hit, sessions: hit ? [SESSION, OTHER] : [] }
 }
 
@@ -119,12 +120,21 @@ function world(
     if (options.pythonMissing && argv[0] === 'python3') return { deny: 'ENOENT python3' }
     const [mode, a, , from] = argv.slice(3)
     const out =
-      mode === 'projects' ? [PROJECT]
-      : mode === 'sessions' ? [SESSION, OTHER]
-      : mode === 'context' ? context(String(a))
-      : digestOf(options.turns ?? 3, Number(from ?? 0))
+      mode === 'projects'
+        ? [PROJECT]
+        : mode === 'sessions'
+          ? [SESSION, OTHER]
+          : mode === 'context'
+            ? context(String(a))
+            : digestOf(options.turns ?? 3, Number(from ?? 0))
     return {
-      value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+      value: {
+        exitCode: 0,
+        stdout: JSON.stringify(out),
+        stderr: '',
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      },
     }
   })
   on('model.complete', (_, e) => {
@@ -133,7 +143,13 @@ function world(
     w.models.push({ model: e.model, stage, prompt: e.prompt })
     if (stage === options.failStage) {
       return {
-        value: { isAnswered: false, reason: 'api-error' as const, status: 529, error: 'overloaded' as const, usage: USAGE },
+        value: {
+          isAnswered: false,
+          reason: 'api-error' as const,
+          status: 529,
+          error: 'overloaded' as const,
+          usage: USAGE,
+        },
       }
     }
     const text =
@@ -215,15 +231,19 @@ test('part notes are cached: writing the recap again condenses nothing again', a
   await ui.unmount()
 })
 
-test('a cheaper part model can be set; the merge stays on the session model', { options: { partModel: 'haiku' } }, async ($, on) => {
-  const w = world(on, { turns: 200 })
-  await startSession($)
-  await typeCommand($)
-  await w.clock.settle()
+test(
+  'a cheaper part model can be set; the merge stays on the session model',
+  { options: { partModel: 'haiku' } },
+  async ($, on) => {
+    const w = world(on, { turns: 200 })
+    await startSession($)
+    await typeCommand($)
+    await w.clock.settle()
 
-  expect(new Set(w.models.filter(m => m.stage === 'part').map(m => m.model))).toEqual(new Set(['haiku']))
-  expect(w.models.at(-1)?.model).toBe('the-session-model')
-})
+    expect(new Set(w.models.filter(m => m.stage === 'part').map(m => m.model))).toEqual(new Set(['haiku']))
+    expect(w.models.at(-1)?.model).toBe('the-session-model')
+  },
+)
 
 test('a session that went on is updated from the prompts after the old recap', async ($, on) => {
   const old = { size: 4000, mtimeMs: 1500, at: 0, prompts: 2, markdown: '## Intent\nStart the app.' }
