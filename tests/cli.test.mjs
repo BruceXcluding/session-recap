@@ -21,6 +21,8 @@ describe('detectAgent', () => {
     assert.equal(detectAgent({ OPENCODE: '1' }), 'opencode')
     assert.equal(detectAgent({ DSH_SESSION: 'x' }), 'dsh')
     assert.equal(detectAgent({}), 'any')
+    // Where an agent keeps its files is a person's setting, not a marker.
+    assert.equal(detectAgent({ CODEX_HOME: '/x', DSH_HOME: '/y' }), 'any')
   })
 })
 
@@ -38,6 +40,11 @@ describe('modelConfig', () => {
   test('Anthropic variables, with a gateway and a token', () => {
     const c = modelConfig({}, { ANTHROPIC_AUTH_TOKEN: 't', ANTHROPIC_BASE_URL: 'http://gw', ANTHROPIC_MODEL: 'big' })
     assert.deepEqual([c.api, c.baseUrl, c.bearer, c.model], ['anthropic', 'http://gw', true, 'big'])
+  })
+
+  test('SESSION_RECAP_API alone does not mix protocols with a detected key', () => {
+    const c = modelConfig({}, { SESSION_RECAP_API: 'openai', SESSION_RECAP_MODEL: 'm', ANTHROPIC_API_KEY: 'a' })
+    assert.deepEqual([c.api, c.baseUrl, c.model], ['anthropic', 'https://api.anthropic.com', 'm'])
   })
 
   test('DeepSeek and OpenAI keys', () => {
@@ -121,6 +128,7 @@ test('estimateTokens counts CJK characters as one token each', () => {
 test('the skill names its agent', () => {
   assert.match(skillText('codex'), /session-recap --agent codex/)
   assert.match(skillText('any'), /^---\nname: session-recap\n/)
+  assert.match(skillText('dsh', '"/n/node" "/c/cli.mjs"'), /"\/n\/node" "\/c\/cli.mjs" --agent dsh/)
 })
 
 // ------------------------------------------------------------ whole runs
@@ -205,7 +213,9 @@ describe('a whole run against a fake model server', () => {
     assert.equal(r.code, 0, r.err)
     const prompt = requests.at(-1).messages[1].content
     assert.match(prompt, /<previous-recap>\n## Intent\nRecap 1\./)
-    assert.match(prompt, /prompts 3 to 3/)
+    // The last covered prompt comes again, for how its turn ended.
+    assert.match(prompt, /prompts 2 to 3/)
+    assert.match(prompt, /Step 2 of the app/)
     assert.doesNotMatch(prompt, /Step 1 of the app/)
     assert.match(r.err, /updated from prompt 3/)
   })

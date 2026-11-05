@@ -8,8 +8,10 @@ import type { Job, ProjectRow, Recap, SessionRow, View } from '../types'
 const PANE = 'session-recap'
 const TITLE = 'Session recap'
 const SESSIONS_SHOWN = 60
-// Part notes kept for retries and repeats; each is a few KB of the store's 4 MiB.
-const NOTES_KEPT = 150
+// The plugin's store holds 4 MiB of JSON in all, past which every write fails:
+// keep the newest recaps (a few KB each) and part notes, drop the rest.
+const RECAPS_KEPT = 250
+const NOTES_KEPT = 100
 
 const AGENT_LABEL: Record<string, string> = {
   claude: 'Claude Code',
@@ -156,20 +158,33 @@ async function setJob($: EngineInterface, key: string, job: Job | undefined): Pr
   })
 }
 
-// Part notes by content hash, the oldest dropped past NOTES_KEPT.
+type Note = { note: string; at: number }
+
+// Part notes by content hash. Each is its own key, so parts condensed in
+// parallel never write the same entry; prune() trims them afterwards.
 function noteCache($: EngineInterface) {
   return {
-    get: async (key: string) => (await $.store.get(`note:${key}`)) as string | undefined,
-    set: async (key: string, note: string) => {
-      await $.store.set(`note:${key}`, note)
-      const order = ((await $.store.get('notes')) as string[] | undefined) ?? []
-      const next = [...order.filter(k => k !== key), key]
-      for (const old of next.splice(0, Math.max(0, next.length - NOTES_KEPT))) {
-        await $.store.delete(`note:${old}`)
-      }
-      await $.store.set('notes', next)
-    },
+    get: async (key: string) => ((await $.store.get(`note:${key}`)) as Note | undefined)?.note,
+    set: (key: string, note: string) => $.store.set(`note:${key}`, { note, at: Date.now() } satisfies Note),
   }
+}
+
+// Drops the oldest recaps and notes past their limits; runs once per recap,
+// after the parallel work, so nothing else writes meanwhile.
+async function prune($: EngineInterface): Promise<void> {
+  const keys = await $.store.keys()
+  const dated = async (prefix: string) =>
+    Promise.all(
+      keys
+        .filter(k => k.startsWith(prefix))
+        .map(async k => ({ k, at: Number(((await $.store.get(k)) as { at?: number } | undefined)?.at ?? 0) })),
+    )
+  for (const [prefix, kept] of [['recap:', RECAPS_KEPT], ['note:', NOTES_KEPT]] as const) {
+    const rows = (await dated(prefix)).sort((a, b) => b.at - a.at)
+    for (const { k } of rows.slice(kept)) await $.store.delete(k)
+  }
+  // Version 0.3.0 kept a list of note keys; the dates replace it.
+  if (keys.includes('notes')) await $.store.delete('notes')
 }
 
 async function summarize($: EngineInterface, session: SessionRow, partModel: string): Promise<void> {
@@ -209,6 +224,8 @@ async function summarize($: EngineInterface, session: SessionRow, partModel: str
       prompts: digest.prompts,
     }
     await $.store.set(`recap:${key}`, recap)
+    if (session.agent === 'claude') await $.store.delete(`recap:${session.id}`)
+    await prune($)
     await update($, view, v => {
       const intent = oneLine(sectionsOf(markdown).intent, 160)
       const sessions = v.sessions.map(s => (keyOf(s) === key ? { ...s, recap: 'fresh' as const, intent } : s))
@@ -223,22 +240,29 @@ async function summarize($: EngineInterface, session: SessionRow, partModel: str
   }
 }
 
-async function useSession($: EngineInterface, session: SessionRow): Promise<SessionRow> {
-  const projects = (await python($, ['projects'])) as ProjectRow[]
-  const project = projects.find(p => p.cwd === session.cwd)
-  const rows = (await python($, ['sessions', session.cwd])) as SessionRow[]
-  const sessions = await withRecapMarks($, rows.slice(0, SESSIONS_SHOWN))
-  await update($, view, v => ({ ...v, projects, project, sessions, agent: undefined }))
+type Context = { projects: ProjectRow[]; session: SessionRow | null; sessions: SessionRow[] }
 
-  return sessions.find(s => keyOf(s) === keyOf(session)) ?? (await withRecapMarks($, [session]))[0] ?? session
+// One scan: the projects, the session matching `query` and its project's
+// sessions, all put in the view. Resolves the matched session, marked.
+async function lookUp($: EngineInterface, query: string): Promise<{ projects: ProjectRow[]; session?: SessionRow }> {
+  const found = (await python($, ['context', query])) as Context
+  if (found.session === null) {
+    await update($, view, v => ({ ...v, projects: found.projects }))
+    return { projects: found.projects }
+  }
+  const hit = found.session
+  const project = found.projects.find(p => p.cwd === hit.cwd)
+  const sessions = await withRecapMarks($, found.sessions.slice(0, SESSIONS_SHOWN))
+  await update($, view, v => ({ ...v, projects: found.projects, project, sessions, agent: undefined }))
+  const session = sessions.find(s => keyOf(s) === keyOf(hit)) ?? (await withRecapMarks($, [hit]))[0] ?? hit
+
+  return { projects: found.projects, session }
 }
 
 async function currentSession($: EngineInterface): Promise<SessionRow | undefined> {
-  const id = await $.session.id()
-  const hits = (await python($, ['find', id])) as SessionRow[]
-  const hit = hits.find(s => s.agent === 'claude' && s.id === id)
+  const { session } = await lookUp($, await $.session.id())
 
-  return hit === undefined ? undefined : useSession($, hit)
+  return session?.agent === 'claude' ? session : undefined
 }
 
 function ago(ms: number): string {
@@ -263,15 +287,13 @@ type Found = { kind: 'project'; project: ProjectRow } | { kind: 'session'; sessi
 // title or id does, newest first.
 async function findByName($: EngineInterface, query: string): Promise<Found | undefined> {
   const q = query.toLowerCase()
-  const projects = (await python($, ['projects'])) as ProjectRow[]
-  await update($, view, v => ({ ...v, projects }))
+  const { projects, session } = await lookUp($, query)
   const project =
     projects.find(p => baseName(p.cwd).toLowerCase() === q) ??
     projects.find(p => baseName(p.cwd).toLowerCase().includes(q))
   if (project !== undefined) return { kind: 'project', project }
-  const [hit] = (await python($, ['find', query])) as SessionRow[]
 
-  return hit === undefined ? undefined : { kind: 'session', session: await useSession($, hit) }
+  return session === undefined ? undefined : { kind: 'session', session }
 }
 
 export const register: Register = (on, options) => {

@@ -97,12 +97,17 @@ export function python(args) {
   throw new Error(`digest.py failed: ${last}`)
 }
 
-// The agent this runs inside, from the markers each one sets.
+// Variables a person may export in their own shell profile: they say where
+// an agent keeps its files, not that this runs inside it.
+const SETTINGS_VARS = new Set(['CODEX_HOME', 'DSH_HOME'])
+
+// The agent this runs inside, from the markers each one sets for its tools.
 export function detectAgent(env = process.env) {
+  const set = prefix => Object.keys(env).some(k => k.startsWith(prefix) && !SETTINGS_VARS.has(k))
   if (env.CLAUDECODE === '1') return 'claude'
-  if (Object.keys(env).some(k => k.startsWith('CODEX_'))) return 'codex'
+  if (set('CODEX_')) return 'codex'
   if (env.OPENCODE !== undefined || env.OPENCODE_BIN_PATH !== undefined) return 'opencode'
-  if (Object.keys(env).some(k => k.startsWith('DSH_'))) return 'dsh'
+  if (set('DSH_')) return 'dsh'
   return 'any'
 }
 
@@ -172,10 +177,14 @@ export function modelConfig(opts = {}, env = process.env) {
       source: 'OPENAI_API_KEY',
     }
   }
+  // A key or base URL of session-recap's own starts a provider of its own;
+  // without one, only the model names apply on top of the detected provider,
+  // so its protocol, endpoint and key stay together.
   const isExplicit = explicit.apiKey !== undefined || explicit.baseUrl !== undefined
   const base = isExplicit ? { api: 'openai', source: 'session-recap settings' } : auto
   const merged = { ...base }
-  for (const [k, v] of Object.entries(explicit)) if (v !== undefined) merged[k] = v
+  const applies = isExplicit ? Object.keys(explicit) : ['model', 'partModel']
+  for (const k of applies) if (explicit[k] !== undefined) merged[k] = explicit[k]
   merged.partModel = merged.partModel || merged.model
 
   return merged
@@ -361,9 +370,7 @@ async function recap(opts) {
 function list(opts) {
   const agent = opts.agent && opts.agent !== 'auto' ? opts.agent : 'any'
   const query = opts.words.join(' ')
-  const rows = (query ? python(['find', query]) : python(['projects']).flatMap(p => python(['sessions', p.cwd])))
-    .filter(r => agent === 'any' || r.agent === agent)
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+  const rows = python(query ? ['find', query] : ['all']).filter(r => agent === 'any' || r.agent === agent)
   if (opts.json) return process.stdout.write(`${JSON.stringify(rows)}\n`)
   for (const r of rows) {
     process.stdout.write(`${LABEL[r.agent].padEnd(11)} ${ago(r.mtimeMs).padStart(8)}  ${r.title}\n${' '.repeat(22)}${r.cwd}  (${r.id})\n`)
@@ -379,7 +386,11 @@ function projects(opts) {
   }
 }
 
-export function skillText(agent) {
+// Desktop agents often run tools without the shell profile's PATH, so the
+// skill names this install's full command as well.
+const FULL_COMMAND = `"${process.execPath}" "${fileURLToPath(import.meta.url)}"`
+
+export function skillText(agent, full = FULL_COMMAND) {
   const flag = agent === 'any' ? '' : ` --agent ${agent}`
   return `---
 name: session-recap
@@ -392,6 +403,12 @@ description: Recap an AI coding session - its intent, key decisions, what change
 
    \`\`\`bash
    session-recap${flag}
+   \`\`\`
+
+   If the shell says \`session-recap\` is not found, run it by its full path instead:
+
+   \`\`\`bash
+   ${full}${flag}
    \`\`\`
 
    For an earlier session, find it with \`session-recap list <words>\` and run \`session-recap${flag} "<title words>"\`.

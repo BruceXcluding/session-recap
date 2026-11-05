@@ -92,11 +92,15 @@ class ClaudeTest(Base):
                                     "  · git commit -m 'one page'\n"
                                     "[ASSISTANT] Done: one page.")
 
-    def test_from_keeps_only_later_turns(self):
-        path = self.claude("s1", [claude_user("ask %d" % i) for i in range(5)])
+    def test_from_keeps_later_turns_and_the_last_covered_one(self):
+        records = [claude_user("ask %d" % i) for i in range(5)]
+        records.insert(3, claude_assistant(text("how ask 2 ended")))
+        path = self.claude("s1", records)
         d = digest.digest("claude", path, 3)
         self.assertEqual((d["prompts"], d["from"]), (5, 3))
-        self.assertNotIn("ask 2", d["text"])
+        self.assertNotIn("ask 1", d["text"])
+        # Prompt 3 ("ask 2") again: a recap written mid-turn missed its ending.
+        self.assertIn("ask 2\n[ASSISTANT] how ask 2 ended", d["text"])
         self.assertIn("ask 3", d["text"])
         self.assertIn("ask 4", d["text"])
 
@@ -195,6 +199,20 @@ class DshTest(Base):
         self.assertIn("[USER 2026-10-", d["text"])
         self.assertIn("  · git push origin main\n[ASSISTANT] It is a shop.", d["text"])
         self.assertNotIn("thinking", d["text"])
+
+    def test_a_migrated_session_is_read_from_its_newer_file(self):
+        new = self.session("session-3", [
+            {"type": "user/message", "data": {"content": [{"type": "text", "text": "after migration"}],
+                                              "source": {"kind": "user"}}}])
+        folder = os.path.dirname(new)
+        old_raw = os.path.join(folder, "session.jsonl")
+        write_lines(old_raw, [{"type": "session", "id": "session-3", "cwd": "/code/web"}] +
+                    [{"type": "user/message", "data": {"content": [{"type": "text", "text": "old %d %s" % (i, "x" * 400)}],
+                                                       "source": {"kind": "user"}}} for i in range(200)])
+        subprocess.run(["zstd", "-q", "--rm", "-o", old_raw + ".zstd", old_raw], check=True)
+        os.utime(old_raw + ".zstd", (1_000_000, 1_000_000))
+        self.assertGreater(os.path.getsize(old_raw + ".zstd"), os.path.getsize(new))
+        self.assertEqual(digest.dsh_file(folder), new)
 
 
 class OpenCodeTest(Base):

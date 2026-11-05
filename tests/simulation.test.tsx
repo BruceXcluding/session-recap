@@ -63,6 +63,13 @@ function digestOf(turns: number, from = 0) {
   }
 }
 
+// digest.py's `context`: the session matching the query (id, else title) and its project.
+function context(query: string) {
+  const q = query.toLowerCase()
+  const hit = [SESSION, OTHER].find(s => s.id === q) ?? [SESSION, OTHER].find(s => s.title.toLowerCase().includes(q)) ?? null
+  return { projects: [PROJECT], session: hit, sessions: hit ? [SESSION, OTHER] : [] }
+}
+
 type World = {
   models: { model: string; stage: 'part' | 'merge'; prompt: string }[]
   runs: string[][]
@@ -97,6 +104,7 @@ function world(
     w.store.delete(e.key)
     return { value: undefined }
   })
+  on('store.keys', () => ({ value: [...w.store.keys()] }))
   on('command.register', () => ({ value: { command: 'session-recap' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.toast', (_, e) => {
@@ -113,7 +121,7 @@ function world(
     const out =
       mode === 'projects' ? [PROJECT]
       : mode === 'sessions' ? [SESSION, OTHER]
-      : mode === 'find' ? [SESSION, OTHER].filter(s => s.id === a || s.title.toLowerCase().includes(String(a).toLowerCase()))
+      : mode === 'context' ? context(String(a))
       : digestOf(options.turns ?? 3, Number(from ?? 0))
     return {
       value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
@@ -203,7 +211,7 @@ test('part notes are cached: writing the recap again condenses nothing again', a
 
   expect(w.models.filter(m => m.stage === 'part').length).toBe(3)
   expect(w.models.filter(m => m.stage === 'merge').length).toBe(2)
-  expect((w.store.get('notes') as string[]).length).toBe(3)
+  expect([...w.store.keys()].filter(k => k.startsWith('note:')).length).toBe(3)
   await ui.unmount()
 })
 
@@ -227,9 +235,27 @@ test('a session that went on is updated from the prompts after the old recap', a
   expect(w.runs.some(r => r[3] === 'digest' && r[6] === '2')).toBe(true)
   const merge = w.models.at(-1)
   expect(merge?.prompt).toContain('<previous-recap>\n## Intent\nStart the app.')
-  expect(merge?.prompt).toContain('prompts 3 to 3')
+  expect(merge?.prompt).toContain('prompts 2 to 3')
   expect(merge?.prompt).not.toContain('step 0')
   expect(w.store.get('recap:claude:cur')).toMatchObject({ prompts: 3, size: 5000 })
+})
+
+test('the store keeps the newest 250 recaps and 100 notes', async ($, on) => {
+  const store: Record<string, unknown> = { notes: ['n0'] }
+  for (let i = 0; i < 260; i++) store[`recap:codex:r${i}`] = { size: 1, mtimeMs: 1, at: i, markdown: 'x' }
+  for (let i = 0; i < 105; i++) store[`note:n${i}`] = { note: 'x', at: i }
+  const w = world(on, { store })
+  await startSession($)
+  await typeCommand($)
+  await w.clock.settle()
+
+  const keys = [...w.store.keys()]
+  expect(keys.filter(k => k.startsWith('recap:')).length).toBe(250)
+  expect(keys.filter(k => k.startsWith('note:')).length).toBe(100)
+  // The new recap is the newest, so it stays; the oldest go.
+  expect(w.store.has('recap:claude:cur')).toBe(true)
+  expect(w.store.has('recap:codex:r0')).toBe(false)
+  expect(w.store.has('notes')).toBe(false)
 })
 
 test('a recap stored by version 0.2 (keyed by id alone) is still found', async ($, on) => {

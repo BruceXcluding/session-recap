@@ -3,6 +3,8 @@
   digest.py projects                      one row per project folder, all agents
   digest.py sessions <cwd>                the sessions of one project folder
   digest.py find <query>                  sessions whose id or title holds the query
+  digest.py all                           every session, newest first
+  digest.py context <query>               projects, the session matching query, its project's sessions
   digest.py current <agent|any> <cwd>     the newest session of an agent in a folder
   digest.py digest <agent> <path> [from]  a session condensed to text, from prompt `from`
 
@@ -25,6 +27,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import urllib.parse
 
 AGENTS = ("claude", "codex", "dsh", "opencode")
 HEAD_LINES = 400
@@ -457,11 +460,15 @@ DSH_KINDS = ('{"type":"user/message"', '{"type":"assistant/message"', '{"type":"
 
 
 def dsh_file(folder):
-    """The session's transcript: the largest of its format versions."""
-    names = [n for n in os.listdir(folder) if n.startswith("session") and n.endswith(".jsonl.zstd")]
-    if not names:
+    """The session's transcript: the most recently written of its format versions.
+
+    A migrated session keeps its old session.jsonl.zstd beside session.v3.jsonl.zstd;
+    the old one can be larger but stops where the migration happened."""
+    paths = [os.path.join(folder, n) for n in os.listdir(folder)
+             if n.startswith("session") and n.endswith(".jsonl.zstd")]
+    if not paths:
         return None
-    return max((os.path.join(folder, n) for n in names), key=os.path.getsize)
+    return max(paths, key=lambda p: (os.path.getmtime(p), os.path.getsize(p)))
 
 
 def zstd_lines(path, limit=None):
@@ -568,7 +575,7 @@ def opencode_connect():
     if not os.path.exists(path):
         return None
     try:
-        return sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+        return sqlite3.connect("file:%s?mode=ro" % urllib.parse.quote(path), uri=True)
     except sqlite3.Error:
         return None
 
@@ -685,8 +692,12 @@ def all_sessions():
 
 
 def list_projects():
+    return group_projects(all_sessions())
+
+
+def group_projects(rows):
     projects = {}
-    for row in all_sessions():
+    for row in rows:
         p = projects.setdefault(row["cwd"], {"cwd": row["cwd"], "sessions": 0, "mtimeMs": 0, "agents": {}})
         p["sessions"] += 1
         p["mtimeMs"] = max(p["mtimeMs"], row["mtimeMs"])
@@ -696,6 +707,17 @@ def list_projects():
 
 def list_sessions(cwd):
     return [r for r in all_sessions() if r["cwd"] == cwd]
+
+
+def session_context(query):
+    """One scan for a command: every project, the session matching `query`
+    (its id exactly, else its title), and the sessions of its project."""
+    rows = all_sessions()
+    q = query.lower()
+    hit = next((r for r in rows if r["id"].lower() == q), None) or \
+        next((r for r in rows if q and q in r["title"].lower()), None)
+    return {"projects": group_projects(rows), "session": hit,
+            "sessions": [r for r in rows if hit is not None and r["cwd"] == hit["cwd"]]}
 
 
 def find_sessions(query):
@@ -745,12 +767,14 @@ def digest(agent, path, start=0):
     READERS[agent](path, out)
     turns = [t for t in out.turns if t[1] or t[3]]
     prompts = sum(1 for t in turns if t[1])
-    # `start` counts the prompts an earlier recap covered: keep the turns after them.
+    # `start` counts the prompts an earlier recap covered. Keep the turns after
+    # them and the last covered one too: a recap written mid-turn has not seen
+    # how that turn ended.
     seen, keep = 0, []
     for t in turns:
         if t[1]:
             seen += 1
-        if seen > start:
+        if start == 0 or seen >= start:
             keep.append(t)
     text = ""
     for prompt_cap, reply_cap in ((PROMPT_CAP, REPLY_CAP), (2000, 700), (1200, 350), (800, 200)):
@@ -775,6 +799,10 @@ def main():
         out = list_sessions(args[0])
     elif mode == "find":
         out = find_sessions(args[0])
+    elif mode == "all":
+        out = all_sessions()
+    elif mode == "context":
+        out = session_context(args[0])
     elif mode == "current":
         out = current_session(args[0], args[1])
     elif mode == "digest":

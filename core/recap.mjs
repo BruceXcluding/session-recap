@@ -123,7 +123,7 @@ export async function writeRecap({ digest, previous, complete, notes, progress =
   await progress({ step: isUpdate ? 'Updating the recap' : 'Writing the recap', done: total - 1, total })
   const prompt = isUpdate
     ? `${meta}\n\nThe recap written after the first ${digest.from} prompts:\n\n<previous-recap>\n${previous.markdown}\n</previous-recap>\n\n` +
-      `What happened since then (prompts ${digest.from + 1} to ${digest.prompts}):\n\n${material}\n\n` +
+      `What happened since then (prompts ${digest.from} to ${digest.prompts}; prompt ${digest.from} is repeated to show how it ended):\n\n${material}\n\n` +
       `Rewrite the whole recap so it covers the session up to now. Keep what still holds from the previous recap, ` +
       `update what changed, move finished items out of Open threads.\n\n${RECAP_FORMAT}`
     : `${meta}\n\n${material}\n\n${RECAP_FORMAT}\nLater parts override earlier ones where the person changed course.`

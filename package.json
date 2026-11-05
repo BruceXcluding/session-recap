@@ -1,6 +1,6 @@
 {
   "name": "session-recap",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Recap any AI coding session (Claude Code, Codex, dsh, OpenCode): its intent, key decisions, what changed, open threads and where to resume.",
   "type": "module",
   "bin": {

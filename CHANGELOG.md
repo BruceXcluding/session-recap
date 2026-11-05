@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-11-05
+
+### Fixed
+- dsh: a migrated session is read from its newer file, not the larger pre-migration one.
+- An update re-reads the last prompt the previous recap covered, so a reply that
+  arrived after a mid-turn recap is no longer lost.
+- The Claude Code plugin's store is pruned (newest 250 recaps, 100 part notes)
+  and old 0.2 keys are removed, so it never reaches its 4 MiB limit; part notes
+  are written without a shared index, so parallel parts cannot overwrite each other.
+- Installed skills give the CLI's full path as a fallback for agents whose tools
+  run without the shell's PATH.
+- `CODEX_HOME` / `DSH_HOME` in a shell profile no longer make the CLI think it runs
+  inside Codex or dsh.
+- `SESSION_RECAP_API` without a key or base URL no longer mixes with another
+  provider's endpoint and key.
+- OpenCode database paths with `#`, `?` or `%` open correctly.
+
+### Changed
+- `/session-recap` and name lookups scan sessions once instead of three times;
+  `session-recap list` scans once instead of once per project.
+
 ## [0.3.0] - 2026-11-05
 
 ### Added
@@ -57,5 +78,6 @@ All notable changes to this project are documented here. The format follows
 - Long sessions are condensed in parts in parallel, then merged into one recap.
 - Recaps are cached per session and rewritten only when the session changes.
 
+[0.3.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.3.1
 [0.3.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.3.0
 [0.2.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.2.0
