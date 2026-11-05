@@ -819,12 +819,30 @@ export async function models(opts, fetchImpl = /** @type {any} */ (fetch)) {
 }
 
 /**
+ * This Node's path as PATH names it (`/opt/homebrew/bin/node`), when PATH has
+ * the same binary: a versioned path (`…/Cellar/node/26.8.1/bin/node`) would
+ * break every MCP entry at the next upgrade.
+ */
+function stableNode() {
+  const real = realpathSync(process.execPath)
+  for (const dir of (process.env.PATH ?? '').split(process.platform === 'win32' ? ';' : ':')) {
+    const candidate = join(dir, process.platform === 'win32' ? 'node.exe' : 'node')
+    try {
+      if (dir !== '' && realpathSync(candidate) === real) return candidate
+    } catch {
+      // Not in this folder.
+    }
+  }
+  return process.execPath
+}
+
+/**
  * The MCP entry for each client, with absolute paths: an IDE launched from the
  * dock does not see the shell's PATH.
  * @param {Options} opts
  */
 function mcpConfig(opts) {
-  const command = process.execPath
+  const command = stableNode()
   const args = [fileURLToPath(import.meta.url), 'mcp']
   const json = (/** @type {unknown} */ v) => JSON.stringify(v, null, 2)
   const server = { command, args }
