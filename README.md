@@ -13,6 +13,7 @@
 <p align="center">
 <a href="https://github.com/BruceXcluding/session-recap/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/BruceXcluding/session-recap/ci.yml?branch=main&style=flat-square&label=tests" alt="tests"></a>
 <a href="https://github.com/BruceXcluding/session-recap/releases"><img src="https://img.shields.io/github/v/release/BruceXcluding/session-recap?style=flat-square" alt="release"></a>
+<a href="https://www.npmjs.com/package/session-recap"><img src="https://img.shields.io/npm/v/session-recap?style=flat-square" alt="npm"></a>
 <a href="./LICENSE"><img src="https://img.shields.io/github/license/BruceXcluding/session-recap?style=flat-square" alt="license"></a>
 </p>
 
@@ -46,7 +47,7 @@ Every recap also has a **Map**: the phases the work went through (pivots marked)
 ## Quick start
 
 ```bash
-npm install -g github:BruceXcluding/session-recap --allow-git=all
+npm install -g session-recap
 session-recap mcp-config            # prints the MCP entry for your client
 session-recap serve                 # opens the local viewer
 ```
@@ -55,7 +56,7 @@ Then, in your agent: *"Recap this session"*, *"What was my last session in this 
 
 **No API key needed.** Through MCP, the agent you are talking to writes the recap with its own model; session-recap only reads and condenses the transcript. A model of session-recap's own is optional (for the CLI and the viewer's **Write recap** button).
 
-`--allow-git=all` lets npm 12 install from GitHub, which it blocks by default ([npm v12](https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/)); older npm accepts it too. session-recap runs no install scripts.
+Or run it without installing: `npx session-recap …`. session-recap has no dependencies and runs no install scripts. The development version: `npm install -g github:BruceXcluding/session-recap --allow-git=all` (npm 12 blocks installs from GitHub without the flag).
 
 **Requirements:** Node.js 20+, `python3` (macOS ships one), and for dsh sessions the `zstd` command or Python 3.14+.
 

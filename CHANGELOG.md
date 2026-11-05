@@ -7,8 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Changed
-- Install instructions add `--allow-git=all`: npm 12 refuses installs from GitHub without it. Tested on npm 10, 11
-  and 12.
+- session-recap is on npm: install with `npm install -g session-recap`, or run `npx session-recap`.
+- Installing the development version from GitHub needs `--allow-git=all` on npm 12, which refuses git installs
+  without it.
 
 ## [0.6.0] - 2026-11-05
 

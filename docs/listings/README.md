@@ -8,7 +8,7 @@ Drafts and steps for each place. Each submission goes out only after a release, 
 | [Official MCP registry](https://github.com/modelcontextprotocol/registry) | the MCP server | the npm package `session-recap` published, with `mcpName` in `package.json`; `mcp-publisher login github` then `mcp-publisher publish` | [`server.json`](../../server.json) |
 | Claude Code | the plugin | nothing more: `/plugin install session-recap --marketplace BruceXcluding/session-recap` works from the repository | [`.claude-plugin/marketplace.json`](../../.claude-plugin/marketplace.json) |
 | Codex | the plugin | nothing more: the repository is a Codex plugin marketplace | [`.agents/plugins/marketplace.json`](../../.agents/plugins/marketplace.json) |
-| npm | the CLI and MCP server | `npm publish` from the repository root (the maintainer's npm account) | [`package.json`](../../package.json) |
+| npm | the CLI and MCP server | published: [`session-recap`](https://www.npmjs.com/package/session-recap); new versions with `npm publish` from the repository root | [`package.json`](../../package.json) |
 
 ## Release checklist
 
