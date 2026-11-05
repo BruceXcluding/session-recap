@@ -1,0 +1,22 @@
+{
+  "name": "session-recap",
+  "owner": {
+    "name": "BruceXcluding",
+    "url": "https://github.com/BruceXcluding"
+  },
+  "metadata": {
+    "description": "session-recap: remember what every Claude Code session was for, even after months and hundreds of MB of transcript."
+  },
+  "plugins": [
+    {
+      "name": "session-recap",
+      "source": "./",
+      "description": "Recap any Claude Code session in a side pane: its intent, key decisions, what changed, open threads and where to resume.",
+      "version": "0.2.0",
+      "author": { "name": "BruceXcluding" },
+      "homepage": "https://github.com/BruceXcluding/session-recap",
+      "license": "MIT",
+      "keywords": ["session", "summary", "recap", "context", "long-session", "memory", "pane"]
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="760" viewBox="0 0 720 760" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>The Session recap pane showing a recap with its Intent and Where to resume cards</title>
+  <rect x="0.5" y="0.5" width="719" height="759" rx="14" fill="#ffffff" stroke="#e4e0dc"/>
+  <!-- pane header -->
+  <text x="28" y="40" font-size="17" fill="#1f1d1b">Session recap</text>
+  <line x1="0" y1="62" x2="720" y2="62" stroke="#ebe7e3"/>
+  <!-- toolbar -->
+  <text x="28" y="102" font-size="15" fill="#8a837c">‹ Sessions</text>
+  <rect x="498" y="80" width="72" height="34" rx="9" fill="#f2efec"/>
+  <text x="534" y="102" font-size="14" fill="#1f1d1b" text-anchor="middle">Copy</text>
+  <rect x="578" y="80" width="118" height="34" rx="9" fill="#f2efec"/>
+  <text x="637" y="102" font-size="14" fill="#1f1d1b" text-anchor="middle">Refresh recap</text>
+  <!-- title -->
+  <text x="28" y="152" font-size="22" font-weight="700" fill="#1f1d1b">Checkout redesign and payments</text>
+  <text x="28" y="178" font-size="13" fill="#8a837c">web-shop · 48.2 MB · active 2h ago · recap from 3m ago</text>
+  <!-- intent card -->
+  <rect x="28" y="198" width="664" height="120" rx="12" fill="#fff" stroke="#d97757" stroke-width="1.5"/>
+  <text x="46" y="224" font-size="11" font-weight="700" letter-spacing="1" fill="#d97757">INTENT</text>
+  <text x="46" y="250" font-size="14.5" fill="#1f1d1b">Replace the three-step checkout with a single page and move card</text>
+  <text x="46" y="272" font-size="14.5" fill="#1f1d1b">payments to Stripe Checkout, so mobile conversion stops dropping at</text>
+  <text x="46" y="294" font-size="14.5" fill="#1f1d1b">the address step.</text>
+  <!-- resume card -->
+  <rect x="28" y="334" width="664" height="98" rx="12" fill="#fff" stroke="#3f9f6b" stroke-width="1.5"/>
+  <text x="46" y="360" font-size="11" font-weight="700" letter-spacing="1" fill="#3f9f6b">WHERE TO RESUME</text>
+  <text x="46" y="386" font-size="14.5" fill="#1f1d1b">Wire the webhook handler in api/stripe.ts to mark orders paid, then</text>
+  <text x="46" y="408" font-size="14.5" fill="#1f1d1b">run the end-to-end test on a phone-sized viewport.</text>
+  <!-- tabs -->
+  <rect x="28" y="452" width="56" height="34" rx="9" fill="#d97757"/>
+  <text x="56" y="474" font-size="14" fill="#fff" text-anchor="middle">All</text>
+  <rect x="92" y="452" width="92" height="34" rx="9" fill="#f2efec"/>
+  <text x="138" y="474" font-size="14" fill="#1f1d1b" text-anchor="middle">Decisions</text>
+  <rect x="192" y="452" width="88" height="34" rx="9" fill="#f2efec"/>
+  <text x="236" y="474" font-size="14" fill="#1f1d1b" text-anchor="middle">Changes</text>
+  <rect x="288" y="452" width="118" height="34" rx="9" fill="#f2efec"/>
+  <text x="347" y="474" font-size="14" fill="#1f1d1b" text-anchor="middle">Open threads</text>
+  <!-- details -->
+  <text x="28" y="524" font-size="16" font-weight="700" fill="#1f1d1b">Decisions</text>
+  <circle cx="40" cy="550" r="3" fill="#1f1d1b"/>
+  <text x="52" y="555" font-size="14.5" fill="#1f1d1b"><tspan font-weight="700">Stripe Checkout over Elements:</tspan> less PCI scope, Apple Pay for free.</text>
+  <circle cx="40" cy="580" r="3" fill="#1f1d1b"/>
+  <text x="52" y="585" font-size="14.5" fill="#1f1d1b"><tspan font-weight="700">Guest checkout stays:</tspan> 41% of orders have no account.</text>
+  <text x="28" y="630" font-size="16" font-weight="700" fill="#1f1d1b">Changes</text>
+  <circle cx="40" cy="656" r="3" fill="#1f1d1b"/>
+  <text x="52" y="661" font-size="14.5" fill="#1f1d1b">New <tspan font-family="Menlo, monospace" font-size="13.5">pages/checkout.tsx</tspan>; old step pages removed (PR #182).</text>
+  <text x="28" y="706" font-size="16" font-weight="700" fill="#1f1d1b">Open threads</text>
+  <circle cx="40" cy="732" r="3" fill="#1f1d1b"/>
+  <text x="52" y="737" font-size="14.5" fill="#1f1d1b">Tax for EU buyers is not verified yet.</text>
+</svg>

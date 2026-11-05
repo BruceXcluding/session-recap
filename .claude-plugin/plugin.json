@@ -1,0 +1,15 @@
+{
+  "name": "session-recap",
+  "version": "0.2.0",
+  "description": "Recap any Claude Code session in a side pane: its intent, key decisions, what changed, open threads and where to resume. Built for long, many-session projects.",
+  "author": {
+    "name": "BruceXcluding",
+    "url": "https://github.com/BruceXcluding"
+  },
+  "homepage": "https://github.com/BruceXcluding/session-recap",
+  "repository": "https://github.com/BruceXcluding/session-recap",
+  "license": "MIT",
+  "keywords": ["session", "summary", "recap", "context", "long-session", "memory", "pane"],
+  "icon": "./.claude-plugin/icon.png",
+  "types": "./types/index.d.ts"
+}

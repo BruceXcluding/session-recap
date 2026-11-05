@@ -1,0 +1,38 @@
+name: Bug report
+description: Something in session-recap does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you saw (paste the pane's red line if there is one), and what you expected.
+    validations:
+      required: true
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where you use it
+      options: [Terminal, Desktop app, VS Code, Other]
+    validations:
+      required: true
+  - type: input
+    id: size
+    attributes:
+      label: Session size
+      description: Shown in the pane, e.g. 179.3 MB
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python3 --version`
+  - type: markdown
+    attributes:
+      value: Please do not paste transcript content or recaps that contain private information.
