@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BruceXcluding/session-recap/schema/recap-v1.schema.json",
+  "title": "session-recap recap, schema version 1",
+  "description": "What `session-recap --json` prints and what the MCP tool recap_session returns as structuredContent (mode \"recap\"). Fields may be added in version 1; removing or changing one makes version 2.",
+  "type": "object",
+  "required": ["schemaVersion", "session", "markdown", "map"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "format": { "type": "string", "description": "recap (default), standup, handoff, pr, or a contributed format" },
+    "session": { "$ref": "#/$defs/session" },
+    "markdown": { "type": "string", "description": "The recap as Markdown, without the map block" },
+    "map": { "oneOf": [{ "$ref": "#/$defs/map" }, { "type": "null" }] },
+    "cached": { "type": "boolean" }
+  },
+  "$defs": {
+    "session": {
+      "type": "object",
+      "required": ["agent", "id", "cwd", "title", "size", "mtimeMs"],
+      "properties": {
+        "agent": { "enum": ["claude", "codex", "dsh", "opencode"] },
+        "id": { "type": "string" },
+        "path": { "type": "string" },
+        "cwd": { "type": "string", "description": "The project folder" },
+        "title": { "type": "string" },
+        "size": {
+          "type": "integer",
+          "description": "Transcript size in bytes, with mtimeMs the version a recap was written for"
+        },
+        "mtimeMs": { "type": "integer" }
+      }
+    },
+    "map": {
+      "type": "object",
+      "required": ["phases", "decisions", "shipped", "open", "rejected"],
+      "properties": {
+        "phases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "pivot"],
+            "properties": {
+              "title": { "type": "string" },
+              "from": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+              "to": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+              "summary": { "type": "string" },
+              "pivot": { "type": "boolean" }
+            }
+          }
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["chosen", "rejected", "status"],
+            "properties": {
+              "chosen": { "type": "string" },
+              "rejected": { "type": "array", "items": { "type": "string" } },
+              "why": { "type": "string" },
+              "status": { "enum": ["done", "open", "paused"] }
+            }
+          }
+        },
+        "shipped": { "type": "array", "items": { "type": "string" } },
+        "open": { "type": "array", "items": { "type": "string" } },
+        "rejected": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

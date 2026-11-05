@@ -4,12 +4,12 @@
 // and calls the model the person configured (Anthropic or OpenAI-compatible).
 
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { CHUNK_CHARS, splitParts, splitRecap, writeRecap } from '../core/recap.mjs'
+import { CHUNK_CHARS, formatText, splitParts, splitRecap, writeRecap } from '../core/recap.mjs'
 
 /** @typedef {import('../core/recap.mjs').CompleteRequest} CompleteRequest */
 /** @typedef {import('../core/recap.mjs').Digest} Digest */
@@ -43,6 +43,9 @@ import { CHUNK_CHARS, splitParts, splitRecap, writeRecap } from '../core/recap.m
  * @property {boolean} [json]
  * @property {boolean} [help]
  * @property {boolean} [version]
+ * @property {string} [port] the viewer's port (serve)
+ * @property {boolean} [noOpen] do not open a browser (serve)
+ * @property {string} [format] a recap format other than the default
  */
 
 /**
@@ -57,7 +60,7 @@ import { CHUNK_CHARS, splitParts, splitRecap, writeRecap } from '../core/recap.m
  */
 
 /** @typedef {{ calls: number, input: number, output: number }} Usage */
-/** @typedef {{ size: number, mtimeMs: number, at: number, prompts?: number, markdown: string }} CachedRecap */
+/** @typedef {{ size: number, mtimeMs: number, at: number, prompts?: number, markdown: string, model?: string }} CachedRecap */
 
 /**
  * The part of `fetch` this uses, so tests can stand in for it.
@@ -74,10 +77,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const DIGEST = join(ROOT, 'hooks', 'digest.py')
 const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version
 /** @type {Agent[]} */
-const AGENTS = ['claude', 'codex', 'dsh', 'opencode']
+export const AGENTS = ['claude', 'codex', 'dsh', 'opencode']
 /** @type {Record<string, string>} */
-const LABEL = { claude: 'Claude Code', codex: 'Codex', dsh: 'dsh', opencode: 'OpenCode' }
-const COMMANDS = ['list', 'projects', 'install', 'config', 'models', 'recap']
+export const LABEL = { claude: 'Claude Code', codex: 'Codex', dsh: 'dsh', opencode: 'OpenCode' }
+const COMMANDS = ['list', 'projects', 'install', 'config', 'models', 'mcp', 'mcp-config', 'serve', 'recap']
 // Settings `config set` writes; the key is read from stdin, never the command line.
 const SETTABLE = ['model', 'partModel', 'api', 'baseUrl', 'apiKey']
 const PARALLEL = 4
@@ -103,10 +106,18 @@ Usage
                                  apiKey (read from stdin: echo $KEY | session-recap config set apiKey -)
   session-recap config unset <key>
   session-recap models           list the models your provider offers; marks the ones in use
+  session-recap mcp              run as an MCP server (stdio) for any MCP client
+  session-recap mcp-config <client>
+                                 print the MCP entry for claude, codex, cursor, gemini,
+                                 opencode, zed, vscode or cline (no client: all of them)
+  session-recap serve            open the local viewer (projects, sessions, Recap and Map)
 
 Options
   --agent <name>    claude, codex, dsh, opencode, or auto (the agent running this; the default)
   --all             every agent's sessions (list); the same as --agent any
+  --port <n>        the viewer's port (serve; default 4711)
+  --no-open         start the viewer without opening a browser
+  --format <name>   recap (default), standup, handoff or pr; only recap is cached
   --refresh         write the recap again from the start instead of updating it
   --dry-run         show what would be sent to the model, and its size, without calling it
   --json            print JSON instead of Markdown
@@ -135,6 +146,9 @@ function parseArgs(argv) {
     else if (a === '--part-model') opts.partModel = value()
     else if (a === '--all') opts.agent = 'any'
     else if (a === '--refresh') opts.refresh = true
+    else if (a === '--port') opts.port = value()
+    else if (a === '--no-open') opts.noOpen = true
+    else if (a === '--format') opts.format = value()
     else if (a === '--dry-run') opts.dryRun = true
     else if (a === '--json') opts.json = true
     else if (a === '-h' || a === '--help') opts.help = true
@@ -418,7 +432,7 @@ async function call(config, model, system, prompt, maxTokens, fetchImpl) {
 // ---------------------------------------------------------------- caches
 
 /** @param {...string} parts */
-function cacheDir(...parts) {
+export function cacheDir(...parts) {
   const base = process.env.XDG_CACHE_HOME || join(homedir(), '.cache')
   const dir = join(base, 'session-recap', ...parts)
   mkdirSync(dir, { recursive: true })
@@ -429,7 +443,7 @@ function cacheDir(...parts) {
  * @param {string} path
  * @returns {any}
  */
-function readJson(path) {
+export function readJson(path) {
   try {
     return JSON.parse(readFileSync(path, 'utf8'))
   } catch {
@@ -438,7 +452,7 @@ function readJson(path) {
 }
 
 /** Part notes as files, one per content hash. @type {NoteCache} */
-const noteFiles = {
+export const noteFiles = {
   get: key => {
     const path = join(cacheDir('notes'), `${key}.txt`)
     return existsSync(path) ? readFileSync(path, 'utf8') : undefined
@@ -465,13 +479,84 @@ function ago(ms) {
 
 // ---------------------------------------------------------------- commands
 
+/**
+ * Where a session's recap is cached; the CLI, the MCP server and the viewer share it.
+ * @param {Session} session
+ */
+export function recapPath(session) {
+  return join(cacheDir('recaps'), `${session.agent}-${session.id.replace(/[^\w.-]/g, '_')}.json`)
+}
+
+/**
+ * Recaps the Claude Code plugin wrote: its store is a JSON object of
+ * `recap:<agent>:<id>` entries under the Claude configuration folder. Read
+ * only, and best effort: a store this cannot read is no store.
+ * @param {Session} session
+ * @returns {CachedRecap | undefined}
+ */
+function pluginRecap(session) {
+  const dir = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'plugins', 'store')
+  /** @type {CachedRecap | undefined} */
+  let best
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith('session-recap_') || !name.endsWith('.json')) continue
+      const store = readJson(join(dir, name)) ?? {}
+      const found =
+        store[`recap:${session.agent}:${session.id}`] ??
+        (session.agent === 'claude' ? store[`recap:${session.id}`] : undefined)
+      if (found && typeof found.markdown === 'string' && (best === undefined || (found.at ?? 0) > best.at)) best = found
+    }
+  } catch {
+    // No Claude Code, or no plugin store yet.
+  }
+  return best
+}
+
+/**
+ * The newest recap of `session`: the shared cache's, or the Claude Code plugin's.
+ * @param {Session} session
+ * @returns {CachedRecap | undefined}
+ */
+export function readCached(session) {
+  /** @type {CachedRecap | undefined} */
+  const own = readJson(recapPath(session))
+  const plugin = pluginRecap(session)
+  if (own === undefined) return plugin
+  return plugin !== undefined && (plugin.at ?? 0) > (own.at ?? 0) ? plugin : own
+}
+
+/**
+ * Saves a recap of `session` as it stands, covering its first `prompts` prompts.
+ * @param {Session} session
+ * @param {number} prompts
+ * @param {string} markdown
+ * @param {string} [model]
+ */
+export function saveCached(session, prompts, markdown, model) {
+  /** @type {CachedRecap} */
+  const saved = { size: session.size, mtimeMs: session.mtimeMs, at: Date.now(), prompts, markdown, model }
+  writeFileSync(recapPath(session), JSON.stringify(saved))
+  return saved
+}
+
+/**
+ * @param {CachedRecap | undefined} recap
+ * @param {Session} session
+ */
+export function isFreshFor(recap, session) {
+  return recap !== undefined && recap.size === session.size && recap.mtimeMs === session.mtimeMs
+}
+
 /** @param {Options} opts */
 async function recap(opts) {
   const session = pickSession(opts)
-  const cachePath = join(cacheDir('recaps'), `${session.agent}-${session.id.replace(/[^\w.-]/g, '_')}.json`)
+  const format = opts.format ?? 'recap'
+  formatText(format)
+  // Another format is written whole each time and not cached: the cache holds recaps.
   /** @type {CachedRecap | undefined} */
-  const previous = opts.refresh ? undefined : readJson(cachePath)
-  const isFresh = previous !== undefined && previous.size === session.size && previous.mtimeMs === session.mtimeMs
+  const previous = opts.refresh || format !== 'recap' ? undefined : readCached(session)
+  const isFresh = isFreshFor(previous, session)
   // A recap that knows how many prompts it covers is brought up to date from there.
   const from = previous?.prompts !== undefined && !isFresh ? previous.prompts : 0
   /** @type {Usage} */
@@ -501,17 +586,18 @@ async function recap(opts) {
       complete: makeComplete(config, usage),
       notes: noteFiles,
       progress,
+      format,
     })
     if (process.stderr.isTTY) process.stderr.write('\r\x1b[2K')
-    /** @type {CachedRecap} */
-    const saved = { size: session.size, mtimeMs: session.mtimeMs, at: Date.now(), prompts: digest.prompts, markdown }
-    writeFileSync(cachePath, JSON.stringify(saved))
+    if (format === 'recap') saveCached(session, digest.prompts, markdown, config.model)
   }
 
   if (opts.json) {
     // The recap's Markdown, and its map as data (null when the model wrote none).
     const { markdown: text, map } = splitRecap(markdown)
-    process.stdout.write(`${JSON.stringify({ session, markdown: text, map: map ?? null, cached: isFresh, usage })}\n`)
+    process.stdout.write(
+      `${JSON.stringify({ schemaVersion: 1, format, session, markdown: text, map: map ?? null, cached: isFresh, usage })}\n`,
+    )
     return
   }
   const meta = [
@@ -544,6 +630,7 @@ function printDryRun(opts, session, digest, from) {
     characters: digest.text.length,
     estimatedInputTokens: estimateTokens(digest.text),
     modelCalls: parts.length > 1 ? parts.length + 1 : 1,
+    secretsRemoved: digest.redactions ?? 0,
   }
   const text = opts.json
     ? JSON.stringify(report)
@@ -731,6 +818,59 @@ export async function models(opts, fetchImpl = /** @type {any} */ (fetch)) {
   process.stdout.write('\nPick one: session-recap config set model <id>   (parts: config set partModel <id>)\n')
 }
 
+/**
+ * The MCP entry for each client, with absolute paths: an IDE launched from the
+ * dock does not see the shell's PATH.
+ * @param {Options} opts
+ */
+function mcpConfig(opts) {
+  const command = process.execPath
+  const args = [fileURLToPath(import.meta.url), 'mcp']
+  const json = (/** @type {unknown} */ v) => JSON.stringify(v, null, 2)
+  const server = { command, args }
+  /** @type {Record<string, { where: string, text: string }>} */
+  const clients = {
+    claude: {
+      where: 'run in a shell',
+      text: `claude mcp add --scope user session-recap -- "${command}" "${args[0]}" mcp`,
+    },
+    codex: {
+      where: '~/.codex/config.toml',
+      text: `[mcp_servers.session-recap]\ncommand = ${JSON.stringify(command)}\nargs = ${JSON.stringify(args)}`,
+    },
+    cursor: { where: '~/.cursor/mcp.json', text: json({ mcpServers: { 'session-recap': server } }) },
+    gemini: {
+      where: '~/.gemini/settings.json (also Qwen Code: ~/.qwen/settings.json)',
+      text: json({ mcpServers: { 'session-recap': server } }),
+    },
+    opencode: {
+      where: '~/.config/opencode/opencode.json',
+      text: json({ mcp: { 'session-recap': { type: 'local', command: [command, ...args], enabled: true } } }),
+    },
+    zed: {
+      where: 'Zed settings.json',
+      text: json({ context_servers: { 'session-recap': { command: { path: command, args } } } }),
+    },
+    vscode: {
+      where: '.vscode/mcp.json, or the user mcp.json',
+      text: json({ servers: { 'session-recap': { type: 'stdio', ...server } } }),
+    },
+    cline: {
+      where: "Cline's cline_mcp_settings.json",
+      text: json({ mcpServers: { 'session-recap': { ...server, disabled: false } } }),
+    },
+  }
+  const wanted = opts.words[0]
+  if (wanted !== undefined && clients[wanted] === undefined)
+    fail(`no MCP entry for "${wanted}"; one of: ${Object.keys(clients).join(', ')}`)
+  for (const [name, c] of Object.entries(clients)) {
+    if (wanted !== undefined && name !== wanted) continue
+    process.stdout.write(
+      `${wanted === undefined ? `## ${name} · ${c.where}\n` : ''}${c.text}\n${wanted === undefined ? '\n' : ''}`,
+    )
+  }
+}
+
 /** @param {Options} opts */
 function showConfig(opts) {
   const c = modelConfig(opts)
@@ -757,6 +897,16 @@ export async function main(argv) {
   if (opts.command === 'install') return install(opts)
   if (opts.command === 'config') return config(opts)
   if (opts.command === 'models') return models(opts)
+  if (opts.command === 'mcp') {
+    // Loaded here, not at the top: the server imports this module.
+    const { serveMcp } = await import('./mcp.mjs')
+    return serveMcp(VERSION)
+  }
+  if (opts.command === 'mcp-config') return mcpConfig(opts)
+  if (opts.command === 'serve') {
+    const { serve } = await import('./serve.mjs')
+    return serve(opts)
+  }
   return recap(opts)
 }
 

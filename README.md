@@ -8,7 +8,7 @@
 
 <p align="center"><strong>Remember what every AI coding session was for.</strong></p>
 
-<p align="center"><sub>intent · key decisions · what changed · open threads · where to resume, for sessions of any length, from any agent</sub></p>
+<p align="center"><sub>intent · key decisions · what changed · open threads · where to resume, for sessions of any length, from any agent, through MCP, a local viewer or a plugin</sub></p>
 
 <p align="center">
 <a href="https://github.com/BruceXcluding/session-recap/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/BruceXcluding/session-recap/ci.yml?branch=main&style=flat-square&label=tests" alt="tests"></a>
@@ -27,10 +27,10 @@
 
 Projects grow, and so does the number of sessions in each one, often across several agents. After a few weeks a session is a 100 MB transcript you no longer remember: why you started it, what you decided, what was left half done.
 
-**session-recap** reads a session's whole transcript and writes a short, structured recap: in a pane beside the chat in Claude Code, or as Markdown from the command line in any agent.
+**session-recap** reads a session's whole transcript and writes a short, structured recap. Use it from **any MCP client** (Codex, Cursor, Zed, Cline, Gemini CLI, OpenCode, Claude Code…), in a **local viewer** for every agent's sessions, from the **command line**, or through native plugins for **Claude Code**, **dsh** and **Codex**.
 
 <p align="center">
-<img src="./docs/recap-pane.svg" width="620" alt="The Session recap pane: an Intent card, a Where to resume card, and tabs for decisions, changes and open threads">
+<img src="./docs/recap-pane.svg" width="620" alt="A recap: an Intent card, a Where to resume card, and tabs for decisions, changes and open threads">
 </p>
 
 | Section | What it answers |
@@ -41,157 +41,111 @@ Projects grow, and so does the number of sessions in each one, often across seve
 | **Open threads** | What is unfinished, unverified or still a question |
 | **Where to resume** | The most sensible next step today |
 
-Recaps are written in the language you mostly write in that session.
+Every recap also has a **Map**: the phases the work went through (pivots marked) down to "you are here", the key decisions with what was turned down, and lists of what shipped, what is open and what was dropped. Recaps are written in the language you mostly write in.
 
-## Supported agents
-
-| Agent | Sessions read from | Recap in |
-| --- | --- | --- |
-| Claude Code | `~/.claude/projects/` | pane + `/session-recap`, or the CLI |
-| Codex | `~/.codex/sessions/`, `archived_sessions/` | the CLI, via the installed skill |
-| dsh (deepseek-harness) | `~/.dsh/sessions/` (zstd) | the CLI, via `~/.agents/skills` |
-| OpenCode | `~/.local/share/opencode/opencode.db` | the CLI, via the installed skill |
-
-Each IDE shows its **own** sessions first: the Claude Code pane opens on Claude Code's, and `session-recap list` inside Codex lists Codex's. One switch (**All agents** in the pane, `--all` on the command line) shows every agent's sessions side by side, grouped by project folder, which is how you see that a project went from Claude Code to Codex last week. The choice is remembered. Codex review threads and dsh subagent sessions are always left out.
-
-## Install
-
-### Claude Code plugin
-
-```
-/plugin install session-recap --marketplace BruceXcluding/session-recap
-```
-
-Answer `y` to add the marketplace, then pick a scope (user scope = every session). In the desktop app: **+** next to the prompt box → **Plugins** → **Add marketplace** `BruceXcluding/session-recap` → **Add plugin**.
-
-The plugin uses your session's own model and needs no API key.
-
-### Command line, for every agent
+## Quick start
 
 ```bash
 npm install -g github:BruceXcluding/session-recap
-session-recap install        # adds the skill to Codex, OpenCode and ~/.agents/skills
+session-recap mcp-config            # prints the MCP entry for your client
+session-recap serve                 # opens the local viewer
 ```
 
-Then ask the agent to "recap this session", or run `session-recap` in the project folder yourself.
+Then, in your agent: *"Recap this session"*, *"What was my last session in this project about?"*, *"总结一下这个会话"*.
 
-Outside Claude Code there is no session model to borrow, so the CLI calls a model you configure:
+**No API key needed.** Through MCP, the agent you are talking to writes the recap with its own model; session-recap only reads and condenses the transcript. A model of session-recap's own is optional (for the CLI and the viewer's **Write recap** button).
+
+**Requirements:** Node.js 20+, `python3` (macOS ships one), and for dsh sessions the `zstd` command or Python 3.14+.
+
+## Ways to use it
+
+| | Best for | How |
+| --- | --- | --- |
+| **MCP server** | any MCP client | `session-recap mcp-config <client>`, see below |
+| **Local viewer** | browsing every agent's sessions, Recap and Map | `session-recap serve` |
+| **Claude Code plugin** | a Recap / Map pane beside the chat | `/plugin install session-recap --marketplace BruceXcluding/session-recap` |
+| **dsh plugin** | `/recap` and the `session_recap` tool in dsh | [packages/dsh](packages/dsh/README.md) |
+| **Codex plugin** | the MCP server, packaged for Codex | [plugins/codex](plugins/codex/README.md) |
+| **Command line** | scripts, quick looks, other formats | `session-recap`, `session-recap list` |
+
+### MCP server
+
+`session-recap mcp-config <client>` prints the entry for `claude`, `codex`, `cursor`, `gemini` (and Qwen Code), `opencode`, `zed`, `vscode` or `cline`, with absolute paths so an IDE started from the dock finds it. For example:
 
 ```bash
-export SESSION_RECAP_API=openai                  # or anthropic
-export SESSION_RECAP_BASE_URL=https://api.deepseek.com
-export SESSION_RECAP_API_KEY=sk-...
-export SESSION_RECAP_MODEL=deepseek-chat
-export SESSION_RECAP_PART_MODEL=deepseek-chat    # optional: a cheaper model for long sessions' parts
+session-recap mcp-config codex >> ~/.codex/config.toml
+claude mcp add --scope user session-recap -- session-recap mcp
 ```
 
-Without these it uses `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` (with `ANTHROPIC_BASE_URL`), `DEEPSEEK_API_KEY` or `OPENAI_API_KEY`, whichever is set. The same settings can live in `~/.config/session-recap/config.json` (`api`, `baseUrl`, `apiKey`, `model`, `partModel`). `session-recap config` shows what is in use, with the key masked.
+Tools:
 
-**Requirements:** `python3` (macOS ships one); Node.js 20+ for the CLI; the `zstd` command or Python 3.14+ for dsh sessions.
+| Tool | What it does |
+| --- | --- |
+| `list_sessions` | Sessions of every agent, filtered by title words, project folder or agent |
+| `recap_session` | The recap of the current session (or one named): a stored one if the session has not changed; else written by session-recap's model if one is configured; else the condensed, secret-free transcript and instructions for the calling agent to write it |
+| `save_recap` | Stores the recap the agent wrote, so it is reused, and updated from the new part next time |
 
-## Usage
+`recap_session` also takes `format`: `standup`, `handoff` or `pr` instead of the recap.
 
-### In Claude Code
+### Local viewer
+
+`session-recap serve` opens `http://127.0.0.1:4711` with every agent's sessions by project folder, grouped by time, filtered by agent; each session's Recap and Map; and, with a model configured, **Write recap** and **Update recap**. It reads the recaps written by the Claude Code plugin, the CLI and MCP clients alike. It answers only on loopback, to the browser tab it opened.
+
+### Claude Code plugin
+
+`/session-recap` recaps the session you are in; `/session-recap browse` lists projects and sessions; `/session-recap <name>` opens a project or a session by name. The pane shows Recap and Map, uses the session's own model (or one picked under **Model**), and shows your Claude Code sessions first, with **All agents** one tap away.
+
+### Command line
 
 | Command | What it does |
 | --- | --- |
-| `/session-recap` | Recaps the session you are in |
-| `/session-recap browse` | Lists every project, then its sessions from every agent |
-| `/session-recap <project>` | Opens a project by folder name |
-| `/session-recap <title words>` | Finds a session by its title and recaps it |
+| `session-recap [words]` | Recaps the session whose title holds the words; with none, the newest one in this folder |
+| `session-recap list [words]` | Lists sessions (the calling agent's; `--all` for every agent) |
+| `session-recap --format standup` | A standup note instead (`handoff`, `pr`) |
+| `session-recap --dry-run` | Shows the size that would be sent, and how many secrets were removed, without calling a model |
+| `session-recap models` | Lists your provider's models |
+| `session-recap config set model <id>` | Saves settings (`partModel`, `api`, `baseUrl`; the key with `config set apiKey -` from stdin) |
 
-The **Projects** screen pins the project this session runs in on top, groups the rest into Today / This week / Earlier, and folds app-made scratch and temp folders away. **Claude Code sessions / All agents** sets the scope.
+The CLI's own model: `SESSION_RECAP_API` (`anthropic` or `openai`), `SESSION_RECAP_BASE_URL`, `SESSION_RECAP_API_KEY`, `SESSION_RECAP_MODEL`, or `ANTHROPIC_*`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`.
 
-**Recap and Map:** every recap has two views. **Recap** (the default) is the text: Intent and Where to resume on top, then Decisions, Changes and Open threads. **Map** draws the same recap as a journey: the phases the work went through, in order, with pivots marked (◆), down to "You are here"; then each key decision with the alternatives it turned down struck through and the reason; then counts of what shipped, what is open and what was rejected, each opening its list. The model writes the map's data with the recap, in the same call. Recaps written before 0.5 get theirs from **Build map**, one small call that reads only the recap. **Copy** copies the text.
+## Supported agents
 
-**Choosing the model:** the **Model** button on the Projects and recap screens picks the model that writes recaps (the session's own, `haiku`, `sonnet` or `opus`) and, separately, a model for condensing long sessions' parts. Aliases resolve through the session's own provider settings, so `haiku` is whatever your setup maps it to. The choice is kept across sessions; each recap says which model wrote it. For a model id that is not an alias, set **Recap model** in the plugin's settings.
-
-In the session list each session shows its agent and the first line of its recap's intent; **All / Claude Code / Codex / dsh / OpenCode** filter the list. ● recap ready · ◐ the session continued since (press **Update recap**) · ○ no recap yet.
-
-### On the command line
-
-| Command | What it does |
+| Agent | Sessions read from |
 | --- | --- |
-| `session-recap` | Recaps the newest session of the agent you run it in, in this folder |
-| `session-recap "<title words>"` | Recaps the session whose title holds the words |
-| `session-recap list [words]` | Lists sessions, newest first |
-| `session-recap projects` | Lists project folders with sessions per agent |
-| `session-recap --dry-run` | Shows how much would be sent to the model, and calls nothing |
-| `session-recap --refresh` | Writes the recap again from the start |
-| `session-recap models` | Lists the models your provider offers, marking the ones in use |
-| `session-recap config set model <id>` | Saves the recap model (`partModel` for long sessions' parts, also `api`, `baseUrl`) |
-| `echo "$KEY" \| session-recap config set apiKey -` | Saves the API key, read from stdin so it stays out of shell history (file mode 600) |
-| `session-recap config` | Shows the settings in use, the key masked |
+| Claude Code | `~/.claude/projects/` |
+| Codex | `~/.codex/sessions/`, `archived_sessions/` (review threads left out) |
+| dsh (deepseek-harness) | `~/.dsh/sessions/` (zstd; subagent sessions left out) |
+| OpenCode | `~/.local/share/opencode/opencode.db` |
 
-Add `--agent claude|codex|dsh|opencode` to pick an agent, `--all` for every agent, `--json` for JSON (with the recap's map as data under `map`). `--model` / `--part-model` override the saved models for one run.
+Want another? [Adding an agent](docs/adding-an-agent.md) is one reader and one test, or [ask for it](https://github.com/BruceXcluding/session-recap/issues/new?template=new_agent.yml).
+
+## Privacy
+
+- **Local.** Sessions are read on your machine. Text leaves it only in the model call a recap needs: your agent's (MCP, plugins) or the one you configured (CLI, viewer). No telemetry.
+- **Secrets removed first.** Keys, tokens, private keys, credentials in URLs and `PASSWORD=…`-style assignments are replaced with `[REDACTED:<kind>]` before any text reaches a model. `--dry-run` shows how many. It is pattern matching, so it cannot know every format: see [SECURITY.md](SECURITY.md).
+- **What is sent** is a condensed transcript: your prompts, each turn's final reply, commits and PRs, the files edited. Tool output and intermediate replies are left out.
 
 ## Token use
 
-Listing sessions never calls a model. A recap sends only what it needs:
-
-| Kept | Left out |
-| --- | --- |
-| every prompt of yours | tool output |
-| the agent's **last** reply of each turn (its conclusion) | read-only tool calls, intermediate replies |
-| commits, pushes, PRs, releases | reasoning, system and injected context blocks |
-| the list of edited files | |
-
-Measured on a real 179 MB Claude Code session (220 prompts): **528k → 195k characters, about 96k input tokens** for a first recap, about 63% less than v0.2.
-
-- **Incremental updates:** when a session continues, only the prompts after the last recap are read, and merged into it. Ten new prompts on that session cost about 10k characters.
-- **Part cache:** a long session is condensed in parts of ≤75k characters; each part's notes are cached by content hash, so a retried or repeated run condenses nothing twice.
-- **Cheaper part model:** set `partModel` (plugin setting) or `SESSION_RECAP_PART_MODEL` to condense parts with a smaller model; the final recap stays on the main one.
+Listing never calls a model. On a real 179 MB Claude Code session (220 prompts), a first recap sends about **195k characters (~96k tokens)**; when the session continues, an update reads only the new prompts. Long sessions are condensed in parts of ≤75k characters, each part's notes cached, and a cheaper model can condense the parts (`partModel`).
 
 ## How it works
 
 ```
 saved sessions (Claude Code · Codex · dsh · OpenCode)
         │
-        ▼
-hooks/digest.py   one reader per agent → turns: prompt, actions, last reply, edits
-        │         listing is indexed in ~/.cache/session-recap (re-read only when a file changes)
-        ▼
-core/recap.mjs    parts of ≤75k chars, cut at prompts → notes (in parallel, cached)
-        │         → one merge call: the five-section recap; or an update of the previous recap
-        ▼
-Claude Code pane (session model, plugin store)   ·   CLI (your model, ~/.cache/session-recap)
+hooks/digest.py      one reader per agent → turns (prompt, actions, final reply, edits) → secrets removed
+        │
+core/recap.mjs       parts → notes (parallel, cached) → one call writes the recap and its map, or updates it
+        │
+MCP server · viewer · CLI · Claude Code pane · dsh tool and /recap      (one cache: ~/.cache/session-recap)
 ```
 
-Transcripts are read on your machine. Text leaves it only in the model calls described above.
+Output is versioned: see [docs/data-format.md](docs/data-format.md) and [`schema/recap-v1.schema.json`](schema/recap-v1.schema.json) to build your own viewer or exporter.
 
-## Develop
+## Contributing
 
-```bash
-git clone https://github.com/BruceXcluding/session-recap
-claude --plugin-dir ./session-recap        # load the plugin from disk; edits reload live
-node session-recap/cli/session-recap.mjs --help
-```
-
-| Check | Command |
-| --- | --- |
-| Plugin manifest and hooks | `claude plugin validate .` |
-| Pane and pipeline tests | `claude plugin test .` |
-| CLI tests | `node --test tests/cli.test.mjs` |
-| Session reader tests | `python3 -m unittest discover -s tests -p 'test_*.py'` |
-
-```
-.claude-plugin/        plugin manifest, marketplace entry, icon
-hooks/register.tsx     Claude Code command and pane
-hooks/digest.py        session readers for every agent; condensing; index
-core/recap.mjs         recap writing, shared by the plugin and the CLI
-cli/session-recap.mjs  the command-line tool and skill installer
-tests/                 pane, pipeline, CLI and reader tests
-```
-
-Adding an agent: a `<agent>_sessions` and `<agent>_digest` pair in `hooks/digest.py`, a fixture test in `tests/test_digest.py`, and an entry in the CLI's `install` targets.
-
-## FAQ
-
-**A recap fails with `api-error` or `HTTP 4xx`.** That is the model provider's answer: credit, quota, model access or a wrong base URL. `session-recap config` shows which endpoint and model the CLI uses.
-
-**Does the CLI know which agent it runs in?** It reads the markers agents set (`CLAUDECODE`, `CODEX_*`, `OPENCODE`, `DSH_*`); the installed skills also pass `--agent` explicitly.
-
-**Is dsh's skill support confirmed?** The skill goes to `~/.agents/skills`, the shared folder several agents read. If your dsh version does not pick it up, run `session-recap --agent dsh` from its shell tool.
+Agents, recap formats, translations and viewers are all welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md); [adding an agent](docs/adding-an-agent.md) and adding a format (one entry in [`core/formats.mjs`](core/formats.mjs)) are the easiest first contributions.
 
 ## License
 

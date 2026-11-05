@@ -2,6 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { addMap, splitRecap, writeRecap } from '../core/recap.mjs'
+import { SECTIONS, sectionsOf } from '../core/sections.mjs'
+import type { SectionKey } from '../core/sections.mjs'
 import type { CompleteRequest, Digest, RecapMap } from '../core/recap.mjs'
 import type { Job, Prefs, ProjectRow, Recap, SessionRow, Tick, View } from '../types'
 
@@ -59,31 +61,6 @@ const FRAME_MS = 200
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 // The one timer that advances `tick`; a reload drops it with the module.
 let ticker: Timer | undefined
-
-type SectionKey = 'intent' | 'ideas' | 'changed' | 'open' | 'resume'
-// The recap's headings, in the order RECAP_FORMAT asks for them; a model
-// that translates a heading is still matched, by the words or by position.
-const SECTIONS: { key: SectionKey; label: string; match: RegExp }[] = [
-  { key: 'intent', label: 'Intent', match: /intent|意图|目标/i },
-  { key: 'ideas', label: 'Decisions', match: /idea|decision|决策|想法|思路/i },
-  { key: 'changed', label: 'Changes', match: /chang|变更|改动|产出|成果/i },
-  { key: 'open', label: 'Open threads', match: /open|thread|未完成|待办|遗留/i },
-  { key: 'resume', label: 'Resume', match: /resume|继续|下一步|接着/i },
-]
-
-function sectionsOf(markdown: string): Partial<Record<SectionKey, string>> {
-  const out: Partial<Record<SectionKey, string>> = {}
-  const parts = markdown.split(/^##\s+/m).slice(1)
-  parts.forEach((part, i) => {
-    const newline = part.indexOf('\n')
-    const heading = newline < 0 ? part : part.slice(0, newline)
-    const body = newline < 0 ? '' : part.slice(newline + 1).trim()
-    const key = SECTIONS.find(s => s.match.test(heading))?.key ?? SECTIONS[i]?.key
-    if (key !== undefined && out[key] === undefined) out[key] = body
-  })
-
-  return out
-}
 
 function oneLine(text: string | undefined, max: number): string | undefined {
   if (text === undefined) return undefined

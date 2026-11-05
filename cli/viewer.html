@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>session-recap</title>
+    <style>
+      :root {
+        --bg: #faf9f7;
+        --card: #ffffff;
+        --text: #1f1d1b;
+        --muted: #6f6a64;
+        --faint: #a39e97;
+        --line: #e7e3de;
+        --accent: #c4633f;
+        --ok: #2f8a5b;
+        --warn: #a96a12;
+        --danger: #b3261e;
+        --chip: #f1eeea;
+        --claude: #c4633f;
+        --codex: #2f6fb3;
+        --dsh: #5b55c9;
+        --opencode: #4f7d32;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1c1b1a;
+          --card: #252422;
+          --text: #ecebe8;
+          --muted: #a8a39c;
+          --faint: #77736d;
+          --line: #3a3835;
+          --accent: #e08a68;
+          --ok: #5cc28c;
+          --warn: #e2a64a;
+          --danger: #f08b84;
+          --chip: #302e2b;
+          --claude: #e08a68;
+          --codex: #6fa6e6;
+          --dsh: #9a95f0;
+          --opencode: #8fc26a;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          15px/1.55 -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          'PingFang SC',
+          'Microsoft YaHei',
+          sans-serif;
+      }
+      main {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 24px 16px 64px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0;
+        font-weight: 600;
+      }
+      h2 {
+        font-size: 22px;
+        margin: 4px 0 2px;
+        font-weight: 650;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .faint {
+        color: var(--faint);
+      }
+      .small {
+        font-size: 13px;
+      }
+      .caps {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        color: var(--faint);
+        text-transform: uppercase;
+        margin: 18px 0 6px;
+      }
+      .chips {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      button.chip {
+        border: 0;
+        background: var(--chip);
+        color: var(--text);
+        padding: 6px 12px;
+        border-radius: 8px;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      button.chip.on {
+        background: var(--text);
+        color: var(--bg);
+      }
+      button.link {
+        border: 0;
+        background: none;
+        color: var(--muted);
+        font: inherit;
+        cursor: pointer;
+        padding: 0;
+      }
+      button.primary {
+        border: 0;
+        background: var(--accent);
+        color: #fff;
+        padding: 8px 14px;
+        border-radius: 8px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: default;
+      }
+      .row {
+        display: block;
+        width: 100%;
+        text-align: left;
+        background: none;
+        border: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 10px 2px;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+      }
+      .row:hover {
+        background: var(--card);
+      }
+      .row .title {
+        font-weight: 600;
+      }
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 6px;
+        vertical-align: 1px;
+      }
+      .agent {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin: 10px 0;
+      }
+      .card.intent {
+        border-color: var(--accent);
+      }
+      .card.resume {
+        border-color: var(--ok);
+      }
+      .card.error {
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+      .card .caps {
+        margin-top: 0;
+      }
+      .md h3 {
+        font-size: 15px;
+        margin: 14px 0 4px;
+      }
+      .md p {
+        margin: 6px 0;
+      }
+      .md ul {
+        margin: 6px 0;
+        padding-left: 20px;
+      }
+      .md code {
+        background: var(--chip);
+        padding: 1px 4px;
+        border-radius: 4px;
+        font-size: 13px;
+      }
+      .rail {
+        position: relative;
+        padding-left: 22px;
+      }
+      .phase {
+        position: relative;
+        padding: 0 0 12px;
+      }
+      .phase::before {
+        content: '';
+        position: absolute;
+        left: -15px;
+        top: 18px;
+        bottom: 0;
+        border-left: 1px solid var(--line);
+      }
+      .phase .mark {
+        position: absolute;
+        left: -21px;
+        top: 1px;
+        width: 13px;
+        text-align: center;
+      }
+      .phase .head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .phase .dates {
+        color: var(--faint);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .here .mark {
+        color: var(--ok);
+      }
+      .decision {
+        display: grid;
+        grid-template-columns: 20px 1fr;
+        gap: 2px 6px;
+        padding: 6px 0;
+      }
+      .decision s {
+        color: var(--faint);
+      }
+      .bar {
+        height: 4px;
+        background: var(--chip);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-top: 8px;
+      }
+      .bar i {
+        display: block;
+        height: 100%;
+        width: 30%;
+        background: var(--accent);
+        animation: sweep 1.2s ease-in-out infinite;
+      }
+      @keyframes sweep {
+        from {
+          transform: translateX(-100%);
+        }
+        to {
+          transform: translateX(340%);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .bar i {
+          animation: none;
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app"><p class="muted">Loading…</p></main>
+    <script>
+      const AGENTS = { claude: 'Claude Code', codex: 'Codex', dsh: 'dsh', opencode: 'OpenCode' }
+      const state = {
+        screen: 'projects',
+        agent: null,
+        project: null,
+        session: null,
+        mode: 'recap',
+        tab: 'all',
+        list: 'open',
+        showTemp: false,
+      }
+      const app = document.getElementById('app')
+      const DAY = 864e5
+
+      const esc = s =>
+        String(s ?? '').replace(
+          /[&<>"']/g,
+          c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+        )
+      const ago = ms => {
+        const m = Math.round((Date.now() - ms) / 6e4)
+        return m < 60
+          ? `${Math.max(0, m)}m ago`
+          : m < 2880
+            ? `${Math.round(m / 60)}h ago`
+            : `${Math.round(m / 1440)}d ago`
+      }
+      const base = p => p.split('/').filter(Boolean).at(-1) ?? p
+      const isTemp = p => /\/scratch-workspaces\/|^\/(private\/)?tmp(\/|$)|^\/(private\/)?var\/folders\//.test(p)
+      const period = ms => (Date.now() - ms < DAY ? 'Today' : Date.now() - ms < 7 * DAY ? 'This week' : 'Earlier')
+      const dot = a => `<span class="dot" style="background:var(--${esc(a)})"></span>`
+
+      // Markdown, small and safe: escaped first, then headings, lists, bold, code, links.
+      function md(text) {
+        const inline = s =>
+          esc(s)
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+            .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+        const out = []
+        let list = false
+        for (const line of String(text ?? '').split('\n')) {
+          const item = /^\s*[-*]\s+(.*)/.exec(line)
+          if (item) {
+            if (!list) {
+              out.push('<ul>')
+              list = true
+            }
+            out.push(`<li>${inline(item[1])}</li>`)
+            continue
+          }
+          if (list) {
+            out.push('</ul>')
+            list = false
+          }
+          const h = /^#{2,4}\s+(.*)/.exec(line)
+          if (h) out.push(`<h3>${inline(h[1])}</h3>`)
+          else if (line.trim()) out.push(`<p>${inline(line)}</p>`)
+        }
+        if (list) out.push('</ul>')
+        return `<div class="md">${out.join('')}</div>`
+      }
+
+      async function api(path, init) {
+        const res = await fetch(path, { credentials: 'same-origin', ...init })
+        const body = await res.json()
+        if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
+        return body
+      }
+
+      function chips(items, current, onPick) {
+        return `<div class="chips">${items.map(([v, label]) => `<button class="chip${v === current ? ' on' : ''}" data-pick="${esc(v)}">${esc(label)}</button>`).join('')}</div>`
+      }
+
+      async function showProjects() {
+        state.screen = 'projects'
+        const projects = await api('/api/projects')
+        const agents = [...new Set(projects.flatMap(p => Object.keys(p.agents)))]
+        const scoped = projects.filter(p => state.agent === null || p.agents[state.agent])
+        const lasting = scoped.filter(p => !isTemp(p.cwd)),
+          temp = scoped.filter(p => isTemp(p.cwd))
+        const row = p => `<button class="row" data-cwd="${esc(p.cwd)}">
+      <span class="title">${esc(base(p.cwd))}</span> <span class="muted small">${p.sessions} session${p.sessions === 1 ? '' : 's'} · ${ago(p.mtimeMs)}</span><br>
+      <span class="small">${Object.entries(p.agents)
+        .map(
+          ([a, n]) => `${dot(a)}<span class="agent" style="color:var(--${esc(a)})">${esc(AGENTS[a] ?? a)} ${n}</span>`,
+        )
+        .join(' &nbsp;')}</span>
+      <span class="faint small">&nbsp; ${esc(p.cwd)}</span></button>`
+        const groups = ['Today', 'This week', 'Earlier']
+          .map(g => [g, lasting.filter(p => period(p.mtimeMs) === g)])
+          .filter(([, r]) => r.length)
+        app.innerHTML = `<header><h1>Projects</h1>${chips([[null, 'All agents'], ...agents.map(a => [a, AGENTS[a] ?? a])], state.agent)}</header>
+    ${groups.map(([g, rows]) => `<div class="caps">${g}</div>${rows.map(row).join('')}`).join('')}
+    ${temp.length ? `<div class="caps"><button class="link" id="temp">${state.showTemp ? '▾' : '▸'} Temporary folders (${temp.length})</button></div>${state.showTemp ? temp.map(row).join('') : ''}` : ''}
+    ${scoped.length === 0 ? '<p class="muted">No sessions found.</p>' : ''}`
+        app.querySelectorAll('[data-pick]').forEach(
+          b =>
+            (b.onclick = () => {
+              state.agent = b.dataset.pick || null
+              showProjects()
+            }),
+        )
+        app.querySelectorAll('[data-cwd]').forEach(
+          b =>
+            (b.onclick = () => {
+              state.project = b.dataset.cwd
+              showSessions()
+            }),
+        )
+        document.getElementById('temp')?.addEventListener('click', () => {
+          state.showTemp = !state.showTemp
+          showProjects()
+        })
+      }
+
+      async function showSessions() {
+        state.screen = 'sessions'
+        const rows = (await api(`/api/sessions?cwd=${encodeURIComponent(state.project)}`)).filter(
+          s => state.agent === null || s.agent === state.agent,
+        )
+        const mark = s =>
+          s.recap === 'fresh'
+            ? '<span style="color:var(--ok)">●</span>'
+            : s.recap === 'stale'
+              ? '<span style="color:var(--warn)">◐</span>'
+              : '<span class="faint">○</span>'
+        app.innerHTML = `<header><button class="link" id="back">‹ All projects</button></header>
+    <h2>${esc(base(state.project))}</h2><p class="muted small">${esc(state.project)}</p>
+    ${rows
+      .map(
+        s => `<button class="row" data-agent="${esc(s.agent)}" data-id="${esc(s.id)}">
+      ${mark(s)} <span class="title">${esc(s.title)}</span>
+      <span class="small agent" style="color:var(--${esc(s.agent)})">&nbsp;${esc(AGENTS[s.agent] ?? s.agent)}</span> <span class="muted small">· ${ago(s.mtimeMs)}</span>
+      ${s.intent ? `<br><span class="muted small">${esc(s.intent.replace(/[*_`#>]/g, '').slice(0, 200))}</span>` : ''}</button>`,
+      )
+      .join('')}
+    <p class="faint small">● recap ready · ◐ session changed since · ○ no recap yet</p>`
+        document.getElementById('back').onclick = showProjects
+        app.querySelectorAll('[data-id]').forEach(
+          b =>
+            (b.onclick = () => {
+              state.session = { agent: b.dataset.agent, id: b.dataset.id }
+              showRecap()
+            }),
+        )
+      }
+
+      function mapView(map, resume, lastMs) {
+        const latest = new Date(lastMs + DAY).toISOString().slice(0, 10)
+        const froms = map.phases.map(p => p.from).filter(Boolean)
+        const dated =
+          froms.length > 0 &&
+          map.phases.every(p => (p.from ?? '') <= latest && (p.to ?? '') <= latest) &&
+          froms.every((d, i) => i === 0 || froms[i - 1] <= d)
+        const dates = p =>
+          !dated || !p.from ? '' : !p.to || p.to === p.from ? p.from.slice(5) : `${p.from.slice(5)} → ${p.to.slice(5)}`
+        const order = { open: 0, paused: 1, done: 2 },
+          sign = { done: ['✓', 'ok'], open: ['◷', 'warn'], paused: ['⏸', 'warn'] }
+        const lists = { open: map.open, shipped: map.shipped, rejected: map.rejected }
+        return `${
+          map.phases.length
+            ? `<div class="caps">Journey · ${map.phases.length} phases</div><div class="rail">
+      ${map.phases
+        .map(
+          (
+            p,
+            i,
+          ) => `<div class="phase"><span class="mark" style="color:var(--${p.pivot ? 'warn' : i === map.phases.length - 1 ? 'accent' : 'faint'})">${p.pivot ? '◆' : '●'}</span>
+        <div class="head"><b>${esc(p.title)}${p.pivot ? ' <span style="color:var(--warn);font-weight:400">· pivot</span>' : ''}</b><span class="dates">${esc(dates(p))}</span></div>
+        ${p.summary ? `<div class="muted small">${esc(p.summary)}</div>` : ''}</div>`,
+        )
+        .join('')}
+      <div class="phase here"><span class="mark">◉</span><b style="color:var(--ok)">You are here</b>${resume ? `<div class="small">${esc(resume.replace(/[*_`#>]/g, ''))}</div>` : ''}</div></div>`
+            : ''
+        }
+    ${
+      map.decisions.length
+        ? `<div class="caps">Decisions · ${map.decisions.length}</div>
+      ${[...map.decisions]
+        .sort((a, b) => order[a.status] - order[b.status])
+        .map(
+          d => `<div class="decision"><span style="color:var(--${sign[d.status][1]})">${sign[d.status][0]}</span><b>${esc(d.chosen)}</b>
+        <span></span><span class="small muted">${d.rejected.length ? `<s>${esc(d.rejected.join(' · '))}</s>` : ''}${d.rejected.length && d.why ? ' — ' : ''}${esc(d.why ?? '')}</span></div>`,
+        )
+        .join('')}`
+        : ''
+    }
+    <div class="caps">Lists</div>${chips(
+      [
+        ['open', `Open ${lists.open.length}`],
+        ['shipped', `Shipped ${lists.shipped.length}`],
+        ['rejected', `Rejected ${lists.rejected.length}`],
+      ],
+      state.list,
+    )}
+    ${lists[state.list].length ? md(lists[state.list].map(x => `- ${x}`).join('\n')) : '<p class="muted">Nothing here.</p>'}`
+      }
+
+      async function showRecap(writing = false, error = null) {
+        state.screen = 'recap'
+        const { agent, id } = state.session
+        const { session, recap, canWrite } = await api(
+          `/api/recap?agent=${encodeURIComponent(agent)}&id=${encodeURIComponent(id)}`,
+        )
+        const s = recap?.sections ?? {}
+        const tab = state.tab,
+          labels = { ideas: 'Decisions', changed: 'Changes', open: 'Open threads' }
+        const details = (tab === 'all' ? ['ideas', 'changed', 'open'] : [tab])
+          .filter(k => s[k])
+          .map(k => (tab === 'all' ? `### ${labels[k]}\n` : '') + s[k])
+          .join('\n\n')
+        app.innerHTML = `<header><button class="link" id="back">‹ Sessions</button>
+      ${recap ? `<span class="chips"><button class="chip" id="copy">Copy</button>${canWrite ? `<button class="chip" id="write">${recap.isFresh ? 'Refresh recap' : 'Update recap'}</button>` : ''}</span>` : ''}</header>
+    <h2>${esc(session.title)}</h2>
+    <p class="muted small">${esc(AGENTS[session.agent] ?? session.agent)} · ${esc(base(session.cwd))} · active ${ago(session.mtimeMs)}${recap ? ` · recap from ${ago(recap.at)}${recap.model ? ` by ${esc(recap.model)}` : ''}` : ''}</p>
+    ${writing ? '<div class="card"><b>Writing the recap…</b><div class="bar"><i></i></div></div>' : ''}
+    ${error ? `<div class="card error">${esc(error)}</div>` : ''}
+    ${recap && !recap.isFresh && !writing ? '<p class="small" style="color:var(--warn)">The session has continued since this recap.</p>' : ''}
+    ${!recap && !writing ? `<div class="card"><b>No recap yet</b><p class="muted small">${canWrite ? 'Write one with the model configured for session-recap.' : 'Ask your agent to recap this session (MCP tool <code>recap_session</code>), or run <code>session-recap "' + esc(session.title.slice(0, 40)) + '"</code> with a model configured.'}</p>${canWrite ? '<button class="primary" id="write">Write recap</button>' : ''}</div>` : ''}
+    ${
+      recap
+        ? `${chips(
+            [
+              ['recap', 'Recap'],
+              ['map', 'Map'],
+            ],
+            state.mode,
+          )}
+      ${state.mode === 'map' && recap.map ? mapView(recap.map, s.resume, session.mtimeMs) : ''}
+      ${state.mode === 'map' && !recap.map ? '<p class="muted">This recap has no map. Recaps written by session-recap 0.5 or later have one.</p>' : ''}
+      ${
+        state.mode === 'recap'
+          ? `${s.intent ? `<div class="card intent"><div class="caps">Intent</div>${md(s.intent)}</div>` : ''}
+        ${s.resume ? `<div class="card resume"><div class="caps" style="color:var(--ok)">Where to resume</div>${md(s.resume)}</div>` : ''}
+        ${
+          s.intent
+            ? `<div class="chips" id="tabs">${[
+                ['all', 'All'],
+                ['ideas', 'Decisions'],
+                ['changed', 'Changes'],
+                ['open', 'Open threads'],
+              ]
+                .map(([k, l]) => `<button class="chip${tab === k ? ' on' : ''}" data-tab="${k}">${l}</button>`)
+                .join('')}</div>${details ? md(details) : '<p class="muted">Nothing in this section.</p>'}`
+            : md(recap.markdown)
+        }`
+          : ''
+      }`
+        : ''
+    }`
+        document.getElementById('back').onclick = showSessions
+        app.querySelectorAll('[data-pick]').forEach(
+          b =>
+            (b.onclick = () => {
+              if (['recap', 'map'].includes(b.dataset.pick)) state.mode = b.dataset.pick
+              else state.list = b.dataset.pick
+              showRecap()
+            }),
+        )
+        app.querySelectorAll('[data-tab]').forEach(
+          b =>
+            (b.onclick = () => {
+              state.tab = b.dataset.tab
+              showRecap()
+            }),
+        )
+        document.getElementById('copy')?.addEventListener('click', () => navigator.clipboard.writeText(recap.markdown))
+        document.getElementById('write')?.addEventListener('click', async () => {
+          showRecap(true)
+          try {
+            await api(`/api/recap?agent=${encodeURIComponent(agent)}&id=${encodeURIComponent(id)}`, {
+              method: 'POST',
+              headers: { 'x-session-recap': '1' },
+            })
+            showRecap()
+          } catch (err) {
+            showRecap(false, err.message)
+          }
+        })
+      }
+
+      // The token has done its job once the cookie is set: keep it out of the address bar.
+      history.replaceState(null, '', '/')
+      showProjects().catch(err => {
+        app.innerHTML = `<div class="card error">${esc(err.message)}</div>`
+      })
+    </script>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "session-recap",
+  "version": "0.6.0",
+  "description": "Recap any coding session (Codex, Claude Code, dsh, OpenCode): intent, key decisions, what changed, open threads and where to resume.",
+  "author": { "name": "BruceXcluding" },
+  "homepage": "https://github.com/BruceXcluding/session-recap",
+  "license": "MIT",
+  "keywords": ["session", "recap", "summary", "memory", "mcp"],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "session-recap",
+    "shortDescription": "Recap this or any earlier coding session",
+    "longDescription": "Reads saved sessions of Codex, Claude Code, dsh and OpenCode on this machine and writes a short recap: the intent, the key decisions and why, what changed, what is still open, and where to resume. Codex writes the recap with its own model; secrets in transcripts are removed first. Tools: list_sessions, recap_session, save_recap.",
+    "developerName": "BruceXcluding",
+    "category": "Developer Tools",
+    "capabilities": ["Read"],
+    "defaultPrompt": ["Recap this session", "What was my last session in this project about?", "总结一下这个会话"],
+    "brandColor": "#c4633f"
+  }
+}

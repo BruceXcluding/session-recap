@@ -808,6 +808,57 @@ def current_session(agent, cwd):
         here = parent
 
 
+# ---------------------------------------------------------------- secrets
+
+# What a transcript must not carry to a model: credentials pasted into a
+# prompt, printed by a command, or written in a file the agent read back.
+# Each is replaced by [REDACTED:<kind>]; the count goes into the digest.
+SECRET_PATTERNS = [
+    (
+        "private-key",
+        re.compile(
+            r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)", re.S
+        ),
+    ),
+    ("anthropic-key", re.compile(r"\bsk-ant-[A-Za-z0-9_\-]{20,}")),
+    ("openai-key", re.compile(r"\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_\-]{20,}")),
+    ("github-token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})")),
+    ("aws-key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    ("slack-token", re.compile(r"\bxox[abprs]-[A-Za-z0-9\-]{10,}")),
+    ("google-key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
+    ("stripe-key", re.compile(r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}")),
+    ("npm-token", re.compile(r"\bnpm_[A-Za-z0-9]{36}\b")),
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
+    ("bearer-token", re.compile(r"(?i)(\bbearer\s+)[A-Za-z0-9._~+/=\-]{20,}")),
+    ("url-credentials", re.compile(r"(\b[a-z][a-z0-9+.\-]*://)[^\s/:@]+:[^\s/@]+@")),
+    # NAME=value where the name says it is secret, and the value is not a placeholder.
+    (
+        "secret-assignment",
+        re.compile(
+            r"(?i)\b([A-Z0-9_\-]*(?:API[_\-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?|PRIVATE[_\-]KEY)[A-Z0-9_\-]*)"
+            r"(\"?\s*[:=]\s*)([\"']?)(?![\"']?(?:\$\{|<|your|xxx|\*\*\*|\.\.\.|changeme|example|none|null|true|false|\[REDACTED))"
+            r"([^\s\"',;]{8,})"
+        ),
+    ),
+]
+
+
+def redact(text):
+    """The text with secrets replaced, and how many were found."""
+    count = 0
+    for kind, pattern in SECRET_PATTERNS:
+        if kind == "bearer-token":
+            text, n = pattern.subn(lambda m: m.group(1) + "[REDACTED:bearer-token]", text)
+        elif kind == "url-credentials":
+            text, n = pattern.subn(lambda m: m.group(1) + "[REDACTED:credentials]@", text)
+        elif kind == "secret-assignment":
+            text, n = pattern.subn(lambda m: m.group(1) + m.group(2) + m.group(3) + "[REDACTED:secret]", text)
+        else:
+            text, n = pattern.subn("[REDACTED:%s]" % kind, text)
+        count += n
+    return text, count
+
+
 # ---------------------------------------------------------------- digest
 
 READERS = {"claude": claude_digest, "codex": codex_digest, "dsh": dsh_digest, "opencode": opencode_digest}
@@ -826,7 +877,7 @@ def render(turns, prompt_cap, reply_cap):
     return "\n".join(out)
 
 
-def digest(agent, path, start=0):
+def digest(agent, path, start=0, budget=TEXT_BUDGET):
     out = Entries()
     READERS[agent](path, out)
     turns = [t for t in out.turns if t[1] or t[3]]
@@ -843,13 +894,17 @@ def digest(agent, path, start=0):
     text = ""
     for prompt_cap, reply_cap in ((PROMPT_CAP, REPLY_CAP), (2000, 700), (1200, 350), (800, 200)):
         text = render(keep, prompt_cap, reply_cap)
-        if len(text) <= TEXT_BUDGET:
+        if len(text) <= budget:
             break
-    if len(text) > TEXT_BUDGET:
+    if len(text) > budget:
         # Keep the opening (the intent) and the newest part (where it stands).
-        head = TEXT_BUDGET // 5
-        text = text[:head] + "\n\n[… middle of the session left out …]\n\n" + text[-(TEXT_BUDGET - head) :]
+        head = budget // 5
+        text = text[:head] + "\n\n[… middle of the session left out …]\n\n" + text[-(budget - head) :]
+    text, redactions = redact(text)
     meta = out.meta
+    if isinstance(meta.get("title"), str):
+        meta["title"], found = redact(meta["title"])
+        redactions += found
     meta.update(
         {
             "agent": agent,
@@ -857,6 +912,7 @@ def digest(agent, path, start=0):
             "from": min(start, prompts),
             "files": out.files[-80:],
             "fileCount": len(out.files),
+            "redactions": redactions,
             "text": text,
         }
     )
@@ -870,7 +926,9 @@ COMMANDS = {
     "all": lambda: all_sessions(),
     "context": lambda query: session_context(query),
     "current": lambda agent, cwd: current_session(agent, cwd),
-    "digest": lambda agent, path, start="0": digest(agent, path, int(start)),
+    "digest": lambda agent, path, start="0", budget=str(TEXT_BUDGET): digest(
+        agent, path, int(start), int(budget)
+    ),
 }
 
 

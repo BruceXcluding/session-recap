@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-11-05
+
+### Added
+- **MCP server** (`session-recap mcp`): `list_sessions`, `recap_session` and `save_recap` for any MCP client. With no
+  model of its own, `recap_session` hands the condensed, secret-free transcript to the calling agent, which writes the
+  recap with its own model: no API key needed. `session-recap mcp-config <client>` prints the entry for Claude Code,
+  Codex, Cursor, Gemini CLI / Qwen Code, OpenCode, Zed, VS Code and Cline.
+- **Local viewer** (`session-recap serve`): every agent's sessions by project, with Recap and Map, on `127.0.0.1` behind a
+  per-run token; **Write recap** when a model is configured.
+- **dsh plugin** (`packages/dsh`, preview): the `session_recap` tool and `/recap`, on the session's own model route.
+  `npm run build:dsh` packs the release tarball.
+- **Codex plugin** (`plugins/codex`) running the MCP server; the repository is a Codex plugin marketplace.
+- **Recap formats** (`core/formats.mjs`): `standup`, `handoff` and `pr`, through `--format` and the MCP tool's `format`.
+- **Versioned output**: `schemaVersion` in `--json` and the MCP tool, described by `schema/recap-v1.schema.json` and
+  [docs/data-format.md](docs/data-format.md).
+- Contributor guides: [docs/adding-an-agent.md](docs/adding-an-agent.md), a "Support a new agent" issue template, and
+  listing drafts in [docs/listings](docs/listings/README.md), with `server.json` for the official MCP registry.
+
+### Security
+- **Secrets are removed from transcripts before they reach any model**: private keys; Anthropic, OpenAI, GitHub, AWS,
+  Slack, Google, Stripe and npm tokens; JWTs; bearer tokens; credentials in URLs; and secret-named assignments, with
+  placeholders left alone. `--dry-run` and the MCP tool report how many.
+
+### Changed
+- The CLI, MCP server and viewer share one recap cache and also read the Claude Code plugin's recaps.
+
 ## [0.5.1] - 2026-11-05
 
 ### Changed
@@ -137,6 +163,7 @@ All notable changes to this project are documented here. The format follows
 - Long sessions are condensed in parts in parallel, then merged into one recap.
 - Recaps are cached per session and rewritten only when the session changes.
 
+[0.6.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.6.0
 [0.5.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.5.1
 [0.5.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.5.0
 [0.4.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.4.1

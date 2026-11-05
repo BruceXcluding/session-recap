@@ -269,6 +269,8 @@ describe('a whole run against a fake model server', () => {
     assert.doesNotMatch(text.out, /recap-map/)
     const data = JSON.parse((await run('--json')).out)
     assert.doesNotMatch(data.markdown, /recap-map/)
+    assert.equal(data.schemaVersion, 1)
+    assert.equal(data.format, 'recap')
     assert.equal(data.map.phases[0].title, 'Build')
     assert.deepEqual(data.map.open, ['Ship it'])
   })

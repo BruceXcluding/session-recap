@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "session-recap": {
+      "command": "session-recap",
+      "args": ["mcp"],
+      "env_vars": [
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "DSH_HOME",
+        "SESSION_RECAP_API",
+        "SESSION_RECAP_BASE_URL",
+        "SESSION_RECAP_API_KEY",
+        "SESSION_RECAP_MODEL",
+        "SESSION_RECAP_PART_MODEL"
+      ],
+      "startup_timeout_sec": 30
+    }
+  }
+}

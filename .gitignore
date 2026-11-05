@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 *.log
 node_modules/
+
+packages/dsh/vendor/
+packages/dsh/LICENSE
+dist/

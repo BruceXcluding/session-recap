@@ -399,5 +399,65 @@ class CommandTest(Base):
         self.assertEqual(json.loads(out)[0]["cwd"], "/code/app")
 
 
+class RedactTest(unittest.TestCase):
+    # Secrets are assembled at run time, so this file holds no string a
+    # scanner would take for a live credential.
+    GH = "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    SK = "sk-" + "proj-" + "Z9y8X7w6V5u4T3s2R1q0P9o8"
+
+    def test_known_formats(self):
+        cases = {
+            "token %s here" % self.GH: "github-token",
+            "key %s" % self.SK: "openai-key",
+            "AKIA" + "QWERTYUIOPASDFGH": "aws-key",
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----": "private-key",
+        }
+        for text, kind in cases.items():
+            out, n = digest.redact(text)
+            self.assertEqual(n, 1, text)
+            self.assertIn("[REDACTED:%s]" % kind, out)
+
+    def test_assignments_urls_and_bearer_tokens(self):
+        out, n = digest.redact(
+            'DB_PASSWORD="' + "pa55-w0rd!" + '" curl -H "Authorization: Bearer ' + "t" * 32 + '" '
+            "https://bob:" + "hunter22" + "@example.com/x"
+        )
+        self.assertEqual(n, 3)
+        self.assertIn('DB_PASSWORD="[REDACTED:secret]"', out)
+        self.assertIn("Bearer [REDACTED:bearer-token]", out)
+        self.assertIn("https://[REDACTED:credentials]@example.com/x", out)
+
+    def test_placeholders_and_hashes_stay(self):
+        for text in (
+            "API_KEY=your-api-key-here",
+            "TOKEN=${GITHUB_TOKEN}",
+            "SECRET=<set me>",
+            "commit 4f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39",
+            "the password policy is long",
+        ):
+            self.assertEqual(digest.redact(text), (text, 0), text)
+
+
+class RedactDigestTest(Base):
+    def test_digest_redacts_prompts_actions_and_title(self):
+        gh = RedactTest.GH
+        path = self.claude(
+            "s1",
+            [
+                claude_user("use this token: %s" % gh),
+                claude_assistant(tool("Bash", command="export GH_TOKEN=%s && git push" % gh)),
+                {"type": "custom-title", "customTitle": "deploy with %s" % gh},
+            ],
+        )
+        d = digest.digest("claude", path)
+        self.assertNotIn(gh, json.dumps(d))
+        self.assertEqual(d["redactions"], 3)
+        self.assertEqual(d["title"], "deploy with [REDACTED:github-token]")
+
+    def test_budget_argument_caps_the_text(self):
+        path = self.claude("s1", [claude_user("ask %d " % i + "q" * 900) for i in range(100)])
+        self.assertLessEqual(len(digest.digest("claude", path, 0, 20_000)["text"]), 20_100)
+
+
 if __name__ == "__main__":
     unittest.main()

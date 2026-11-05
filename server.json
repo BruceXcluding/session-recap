@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.BruceXcluding/session-recap",
+  "description": "Recap AI coding sessions (Claude Code, Codex, dsh, OpenCode): intent, decisions, changes, open threads, next step.",
+  "repository": { "url": "https://github.com/BruceXcluding/session-recap", "source": "github" },
+  "version": "0.6.0",
+  "packages": [
+    {
+      "registry_type": "npm",
+      "registry_base_url": "https://registry.npmjs.org",
+      "identifier": "session-recap",
+      "version": "0.6.0",
+      "transport": { "type": "stdio" },
+      "package_arguments": [{ "type": "positional", "value": "mcp" }]
+    }
+  ]
+}

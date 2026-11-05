@@ -1,0 +1,23 @@
+name: Support a new agent
+description: Ask for (or offer to write) a reader for another AI coding agent
+labels: [new-agent]
+body:
+  - type: input
+    id: agent
+    attributes:
+      label: Agent
+      description: Name and link, e.g. Gemini CLI (https://github.com/google-gemini/gemini-cli)
+    validations:
+      required: true
+  - type: textarea
+    id: where
+    attributes:
+      label: Where it keeps sessions
+      description: The folder or database, and the file format, if you know them. Do not paste real session content.
+  - type: dropdown
+    id: help
+    attributes:
+      label: Would you write the reader?
+      options: ['Yes, I will open a PR (see docs/adding-an-agent.md)', 'I can test a PR', 'No, just asking']
+    validations:
+      required: true

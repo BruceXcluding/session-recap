@@ -4,6 +4,8 @@
 
 export const CHUNK_CHARS = 75_000
 
+import { FORMATS } from './formats.mjs'
+
 // The map: the same recap as data, for the pane's Map view. It follows the
 // Markdown in one fenced block, so a reader that does not know it sees prose.
 const MAP_FENCE = 'json recap-map'
@@ -107,8 +109,10 @@ export async function sha256(text) {
  *   so a part already condensed (a retried or repeated run) costs nothing.
  * - `progress({ step, done, total })`: called as the work moves.
  */
-export async function writeRecap({ digest, previous, complete, notes, progress = () => {} }) {
-  const isUpdate = previous !== undefined && digest.from > 0
+export async function writeRecap({ digest, previous, complete, notes, progress = () => {}, format = 'recap' }) {
+  const instructions = formatText(format)
+  // Only a recap is updated from an earlier one; another format is written whole.
+  const isUpdate = format === 'recap' && previous !== undefined && digest.from > 0
   if (isUpdate && digest.text.trim() === '') return previous.markdown
 
   const meta = header(digest)
@@ -143,14 +147,45 @@ export async function writeRecap({ digest, previous, complete, notes, progress =
   }
 
   await progress({ step: isUpdate ? 'Updating the recap' : 'Writing the recap', done: total - 1, total })
-  const prompt = isUpdate
-    ? `${meta}\n\nThe recap written after the first ${digest.from} prompts:\n\n<previous-recap>\n${previous.markdown}\n</previous-recap>\n\n` +
-      `What happened since then (prompts ${digest.from} to ${digest.prompts}; prompt ${digest.from} is repeated to show how it ended):\n\n${material}\n\n` +
-      `Rewrite the whole recap so it covers the session up to now. Keep what still holds from the previous recap, ` +
-      `update what changed, move finished items out of Open threads.\n\n${RECAP_FORMAT}`
-    : `${meta}\n\n${material}\n\n${RECAP_FORMAT}\nLater parts override earlier ones where the person changed course.`
+  const prompt = finalPrompt(meta, material, digest, isUpdate ? previous : undefined, instructions)
 
   return complete({ stage: 'merge', system: MERGE_SYSTEM, prompt, maxTokens: 5000 })
+}
+
+/** The instructions of a format; throws on a name no format has. */
+export function formatText(format = 'recap') {
+  if (format === 'recap') return RECAP_FORMAT
+  const found = FORMATS[format]
+  if (found === undefined)
+    throw new Error(`no recap format "${format}"; one of: recap, ${Object.keys(FORMATS).join(', ')}`)
+  return found.instructions
+}
+
+// The one request that writes (or updates) the recap from its material.
+function finalPrompt(meta, material, digest, previous, instructions = RECAP_FORMAT) {
+  return previous !== undefined
+    ? `${meta}\n\nThe recap written after the first ${digest.from} prompts:\n\n<previous-recap>\n${previous.markdown}\n</previous-recap>\n\n` +
+        `What happened since then (prompts ${digest.from} to ${digest.prompts}; prompt ${digest.from} is repeated to show how it ended):\n\n${material}\n\n` +
+        `Rewrite the whole recap so it covers the session up to now. Keep what still holds from the previous recap, ` +
+        `update what changed, move finished items out of Open threads.\n\n${instructions}`
+    : `${meta}\n\n${material}\n\n${instructions}\nLater parts override earlier ones where the person changed course.`
+}
+
+/**
+ * The recap as one request for a model someone else runs: the agent that
+ * called an MCP tool writes it with its own model, so no key is needed here.
+ * `digest` should be condensed small enough for one context (digest.py's
+ * budget argument); `previous` makes it an update, as in writeRecap.
+ */
+export function recapRequest({ digest, previous, format = 'recap' }) {
+  const instructions = formatText(format)
+  const isUpdate = format === 'recap' && previous !== undefined && digest.from > 0
+  const material = `<transcript>\n${digest.text}\n</transcript>`
+
+  return {
+    system: MERGE_SYSTEM,
+    prompt: finalPrompt(header(digest), material, digest, isUpdate ? previous : undefined, instructions),
+  }
 }
 
 /**

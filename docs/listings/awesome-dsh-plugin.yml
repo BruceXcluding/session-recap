@@ -1,0 +1,10 @@
+# Draft for https://github.com/awesome-dsh-plugin/awesome-dsh-plugin, as
+# data/plugins/BruceXcluding__session-recap.yml. Submit after the v0.6.0 release
+# (the tarball must exist) and once the repository is a day old.
+url: https://github.com/BruceXcluding/session-recap
+name: BruceXcluding/session-recap
+category: session
+tarball: https://github.com/BruceXcluding/session-recap/releases/download/v0.6.0/dsh-session-recap-0.6.0.tgz
+description:
+  zh: '回顾会话：读取 dsh、Claude Code、Codex、OpenCode 保存在本机的会话，写出简短回顾——核心意图、关键决策及原因、改动、遗留问题、从哪里继续。提供 session_recap 工具和 /recap 命令，使用会话自身的模型路由，发送前去除记录中的密钥与令牌；回顾缓存在本地，会话继续后只读取新增部分。需要 python3。'
+  en: "Recap a session: reads the sessions dsh, Claude Code, Codex and OpenCode save on this machine and writes a short recap — the intent, key decisions and why, what changed, open threads and where to resume. Adds the session_recap tool and the /recap command, uses the session's own model route, and removes keys and tokens from transcripts before sending. Recaps are cached locally; a continued session is updated from its new part only. Needs python3."

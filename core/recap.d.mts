@@ -9,6 +9,8 @@ export type Digest = {
   from: number
   files: string[]
   fileCount: number
+  // Secrets removed from the text before it reaches a model.
+  redactions?: number
   text: string
 }
 
@@ -39,6 +41,8 @@ export declare function writeRecap(args: {
   complete: (request: CompleteRequest) => Promise<string>
   notes?: NoteCache
   progress?: (p: Progress) => void | Promise<void>
+  // 'recap' (default) or a name in core/formats.mjs
+  format?: string
 }): Promise<string>
 
 export type MapPhase = { title: string; from?: string; to?: string; summary?: string; pivot: boolean }
@@ -59,3 +63,9 @@ export declare function addMap(args: {
   digest?: Digest
   complete: (request: CompleteRequest) => Promise<string>
 }): Promise<string>
+
+export declare function formatText(format?: string): string
+export declare function recapRequest(args: { digest: Digest; previous?: { markdown: string }; format?: string }): {
+  system: string
+  prompt: string
+}

@@ -1,6 +1,6 @@
 {
   "name": "session-recap",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Recap any AI coding session (Claude Code, Codex, dsh, OpenCode): its intent, key decisions, what changed, open threads and where to resume.",
   "type": "module",
   "bin": {
@@ -10,6 +10,7 @@
     "cli/",
     "core/",
     "hooks/digest.py",
+    "schema/",
     "README.md",
     "README.zh-CN.md",
     "LICENSE"
@@ -18,11 +19,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test tests/cli.test.mjs && python3 -m unittest discover -s tests -p 'test_*.py'",
+    "test": "node scripts/build-dsh.mjs && node --test tests/cli.test.mjs tests/mcp.test.mjs tests/dsh.test.mjs && python3 -m unittest discover -s tests -p 'test_*.py'",
     "test:plugin": "claude plugin validate . && claude plugin test .",
     "typecheck": "tsc -p tsconfig.cli.json",
     "lint": "prettier --check . && ruff check hooks tests && ruff format --check hooks tests",
-    "format": "prettier --write . && ruff format hooks tests"
+    "format": "prettier --write . && ruff format hooks tests",
+    "build:dsh": "node scripts/build-dsh.mjs --pack"
   },
   "keywords": [
     "claude-code",
@@ -46,5 +48,6 @@
     "@types/node": "^22.10.2",
     "prettier": "3.4.2",
     "typescript": "5.6.3"
-  }
+  },
+  "mcpName": "io.github.BruceXcluding/session-recap"
 }
