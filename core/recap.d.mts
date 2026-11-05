@@ -40,3 +40,22 @@ export declare function writeRecap(args: {
   notes?: NoteCache
   progress?: (p: Progress) => void | Promise<void>
 }): Promise<string>
+
+export type MapPhase = { title: string; from?: string; to?: string; summary?: string; pivot: boolean }
+export type MapDecision = { chosen: string; rejected: string[]; why?: string; status: 'done' | 'open' | 'paused' }
+export type RecapMap = {
+  phases: MapPhase[]
+  decisions: MapDecision[]
+  shipped: string[]
+  open: string[]
+  rejected: string[]
+}
+
+export declare const MAP_SYSTEM: string
+export declare function splitRecap(raw: string): { markdown: string; map: RecapMap | undefined }
+export declare function parseMap(text: string): RecapMap | undefined
+export declare function addMap(args: {
+  raw: string
+  digest?: Digest
+  complete: (request: CompleteRequest) => Promise<string>
+}): Promise<string>

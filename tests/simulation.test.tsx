@@ -71,8 +71,23 @@ function context(query: string) {
   return { projects: [PROJECT], session: hit, sessions: hit ? [SESSION, OTHER] : [] }
 }
 
+// The map a model writes after the Markdown.
+const MAP = {
+  phases: [
+    { title: 'Explore', from: '2026-10-13', to: '2026-10-14', summary: 'Read the plan', pivot: false },
+    { title: 'Radio site', from: '2026-11-01', summary: 'Nine cities', pivot: true },
+  ],
+  decisions: [
+    { chosen: 'Web first, with a PWA', rejected: ['Native app'], why: 'Links bring new people', status: 'done' },
+  ],
+  shipped: ['PWA push'],
+  open: ['EU tax not verified', 'Gift map copy'],
+  rejected: ['City chessboard'],
+}
+
 type World = {
-  models: { model: string; stage: 'part' | 'merge'; prompt: string }[]
+  models: { model: string; stage: 'part' | 'merge' | 'map'; prompt: string }[]
+  copied: string[]
   runs: string[][]
   toasts: string[]
   clock: ReturnType<typeof mock.clock>
@@ -88,9 +103,11 @@ function world(
     pythonMissing?: boolean
     projects?: unknown[]
     modelDelayMs?: number
+    noMap?: boolean
   } = {},
 ): World {
   const w: World = {
+    copied: [],
     models: [],
     runs: [],
     toasts: [],
@@ -110,6 +127,10 @@ function world(
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   on('command.register', () => ({ value: { command: 'session-recap' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.copy', (_, e) => {
+    w.copied.push(e.text)
+    return { value: { isCopied: true } }
+  })
   on('ui.toast', (_, e) => {
     w.toasts.push(String(e.text))
     return { value: undefined }
@@ -145,7 +166,7 @@ function world(
     // A slow model answers on the test's clock, so a test can watch the work run.
     if (options.modelDelayMs !== undefined) await w.clock.sleep(options.modelDelayMs)
     // Parts are condensed under one system prompt, the recap merged under another.
-    const stage = e.system?.startsWith('You condense') ? 'part' : 'merge'
+    const stage = e.system?.startsWith('You condense') ? 'part' : e.system?.startsWith('You turn') ? 'map' : 'merge'
     w.models.push({ model: e.model, stage, prompt: e.prompt })
     if (stage === options.failStage) {
       return {
@@ -161,7 +182,9 @@ function world(
     const text =
       stage === 'part'
         ? `- note on ${/part (\d+) of/.exec(e.prompt)?.[1] ?? '?'}`
-        : '## Intent\nBuild the app.\n\n## Where to resume\nWrite tests.'
+        : stage === 'map'
+          ? `Here it is:\n\`\`\`json recap-map\n${JSON.stringify(MAP)}\n\`\`\``
+          : `## Intent\nBuild the app.\n\n## Where to resume\nWrite tests.${options.noMap ? '' : `\n\n\`\`\`json recap-map\n${JSON.stringify(MAP)}\n\`\`\``}`
     return { value: { isAnswered: true, text, usage: USAGE } }
   })
 
@@ -503,3 +526,84 @@ test('the progress animates while a recap is written, and stops when it is done'
   expect(await ui.find({ type: 'Markdown', text: /Build the app\./ })).toBeDefined()
   await ui.unmount()
 })
+
+test('Recap is the default; Map draws the journey, the decisions and the lists', async ($, on) => {
+  const w = world(on)
+  await startSession($)
+  await typeCommand($)
+  await w.clock.settle()
+
+  // The recap is asked for its map, and stores it after the Markdown.
+  expect(w.models.at(-1)?.prompt).toContain('```json recap-map')
+  expect(String((w.store.get('recap:claude:cur') as { markdown: string }).markdown)).toContain('```json recap-map')
+
+  const ui = await $.ui.mount(PANE)
+  expect(await ui.find({ key: 'mode-recap' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^INTENT$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^JOURNEY$/ })).toBeUndefined()
+  // The map's data never shows as text, nor goes out with Copy.
+  expect(await ui.find({ type: 'Markdown', text: /recap-map/ })).toBeUndefined()
+  await ui.press({ key: 'copy' })
+  expect(w.copied[0]).toBe('## Intent\nBuild the app.\n\n## Where to resume\nWrite tests.')
+
+  await ui.press({ key: 'mode-map' })
+  expect(await ui.find({ type: 'Text', text: /^INTENT$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^JOURNEY$/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /Explore/ }))?.text).toBe('● Explore  10-13 → 10-14')
+  expect((await ui.find({ type: 'Text', text: /Radio site/ }))?.text).toBe('◆ Radio site  11-01  · pivot')
+  expect(await ui.find({ type: 'Text', text: /Write tests\./ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /Web first/ }))?.text).toBe('✓ Web first, with a PWA')
+  expect(await ui.find({ type: 'Text', text: /^Native app$/ })).toMatchObject({ props: { strikethrough: true } })
+  expect(await ui.find({ key: 'map-open' })).toMatchObject({ text: 'Open 2' })
+  await ui.press({ key: 'map-open' })
+  expect(await ui.find({ type: 'Markdown', text: /EU tax not verified/ })).toBeDefined()
+  await ui.press({ key: 'mode-recap' })
+  expect(await ui.find({ type: 'Text', text: /^INTENT$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a recap written before maps gets one from its Markdown, on request', async ($, on) => {
+  const old = {
+    size: 5000,
+    mtimeMs: 2000,
+    at: 0,
+    prompts: 3,
+    markdown: '## Intent\nCached.\n\n## Where to resume\nGo on.',
+  }
+  const w = world(on, { store: { 'recap:claude:cur': old } })
+  await startSession($)
+  await typeCommand($)
+  await w.clock.settle()
+  expect(w.models).toEqual([])
+
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'mode-map' })
+  expect(await ui.find({ type: 'Text', text: /No map for this recap yet/ })).toBeDefined()
+  await ui.press({ key: 'build-map' })
+  // One small call, reading the recap alone.
+  expect(w.models.map(m => m.stage)).toEqual(['map'])
+  expect(w.models[0]?.prompt).toContain('<recap>\n## Intent\nCached.')
+  expect(await ui.find({ type: 'Text', text: /^JOURNEY$/ })).toBeDefined()
+  const saved = w.store.get('recap:claude:cur') as { markdown: string; at: number }
+  expect(saved.markdown.startsWith('## Intent\nCached.')).toBe(true)
+  expect(saved.markdown).toContain('```json recap-map')
+  expect(saved.at).toBe(0)
+  await ui.unmount()
+})
+
+test(
+  'a recap whose map did not come back still shows, and offers to build the map',
+  { timeoutMs: 5000 },
+  async ($, on) => {
+    const w = world(on, { noMap: true })
+    await startSession($)
+    await typeCommand($)
+    await w.clock.settle()
+
+    const ui = await $.ui.mount(PANE)
+    expect(await ui.find({ type: 'Markdown', text: /Build the app\./ })).toBeDefined()
+    await ui.press({ key: 'mode-map' })
+    expect(await ui.find({ key: 'build-map' })).toBeDefined()
+    await ui.unmount()
+  },
+)

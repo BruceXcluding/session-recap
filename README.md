@@ -102,6 +102,8 @@ Without these it uses `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` (with `ANTHRO
 
 The **Projects** screen pins the project this session runs in on top, groups the rest into Today / This week / Earlier, and folds app-made scratch and temp folders away. **Claude Code sessions / All agents** sets the scope.
 
+**Recap and Map:** every recap has two views. **Recap** (the default) is the text: Intent and Where to resume on top, then Decisions, Changes and Open threads. **Map** draws the same recap as a journey: the phases the work went through, in order, with pivots marked (◆), down to "You are here"; then each key decision with the alternatives it turned down struck through and the reason; then counts of what shipped, what is open and what was rejected, each opening its list. The model writes the map's data with the recap, in the same call. Recaps written before 0.5 get theirs from **Build map**, one small call that reads only the recap. **Copy** copies the text.
+
 **Choosing the model:** the **Model** button on the Projects and recap screens picks the model that writes recaps (the session's own, `haiku`, `sonnet` or `opus`) and, separately, a model for condensing long sessions' parts. Aliases resolve through the session's own provider settings, so `haiku` is whatever your setup maps it to. The choice is kept across sessions; each recap says which model wrote it. For a model id that is not an alias, set **Recap model** in the plugin's settings.
 
 In the session list each session shows its agent and the first line of its recap's intent; **All / Claude Code / Codex / dsh / OpenCode** filter the list. ● recap ready · ◐ the session continued since (press **Update recap**) · ○ no recap yet.
@@ -121,7 +123,7 @@ In the session list each session shows its agent and the first line of its recap
 | `echo "$KEY" \| session-recap config set apiKey -` | Saves the API key, read from stdin so it stays out of shell history (file mode 600) |
 | `session-recap config` | Shows the settings in use, the key masked |
 
-Add `--agent claude|codex|dsh|opencode` to pick an agent, `--all` for every agent, `--json` for JSON. `--model` / `--part-model` override the saved models for one run.
+Add `--agent claude|codex|dsh|opencode` to pick an agent, `--all` for every agent, `--json` for JSON (with the recap's map as data under `map`). `--model` / `--part-model` override the saved models for one run.
 
 ## Token use
 

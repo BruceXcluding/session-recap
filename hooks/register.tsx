@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import { writeRecap } from '../core/recap.mjs'
-import type { Digest } from '../core/recap.mjs'
+import { addMap, splitRecap, writeRecap } from '../core/recap.mjs'
+import type { CompleteRequest, Digest, RecapMap } from '../core/recap.mjs'
 import type { Job, Prefs, ProjectRow, Recap, SessionRow, Tick, View } from '../types'
 
 const PANE = 'session-recap'
@@ -137,7 +137,7 @@ async function withRecapMarks($: EngineInterface, rows: SessionRow[]): Promise<S
     rows.map(async row => {
       const recap = await stored($, row)
       if (recap === undefined) return row
-      const intent = oneLine(sectionsOf(recap.markdown).intent, 160)
+      const intent = oneLine(sectionsOf(splitRecap(recap.markdown).markdown).intent, 160)
 
       return { ...row, recap: isSameVersion(recap, row) ? 'fresh' : 'stale', intent } as SessionRow
     }),
@@ -265,16 +265,53 @@ async function prune($: EngineInterface): Promise<void> {
   if (keys.includes('notes')) await $.store.delete('notes')
 }
 
+// One model call per request: parts on the part model when one is chosen.
+function completer($: EngineInterface, model: string, partModel: string) {
+  return async (request: CompleteRequest) => {
+    const use = request.stage === 'part' && partModel !== '' ? partModel : model
+    const r = await $.model.complete({ ...request, model: use, timeoutMs: 300_000 })
+    if (!r.isAnswered) {
+      const why = r.reason === 'api-error' ? `api-error ${r.status ?? ''}` : r.reason
+      throw new Error(`${use} gave no answer (${why})`)
+    }
+
+    return r.text
+  }
+}
+
+async function chosenModel($: EngineInterface): Promise<{ model: string; partModel: string }> {
+  // The chosen model, else the session's own: the one its provider surely serves.
+  const prefs = (await read($, view)).prefs ?? DEFAULT_PREFS
+
+  return { model: prefs.model !== '' ? prefs.model : await $.session.model(), partModel: prefs.partModel }
+}
+
+// The map of a recap written before maps existed, from its Markdown: one small call.
+async function buildMap($: EngineInterface, session: SessionRow): Promise<void> {
+  const key = keyOf(session)
+  const recap = await stored($, session)
+  if (recap === undefined || (await read($, jobs))[key] !== undefined) return
+  try {
+    const { model } = await chosenModel($)
+    await setJob($, key, { step: `Building the map with ${model}`, done: 0, total: 0 })
+    const markdown = await addMap({ raw: recap.markdown, complete: completer($, model, '') })
+    const next: Recap = { ...recap, markdown, at: recap.at }
+    await $.store.set(`recap:${key}`, next)
+    await update($, view, v => (v.session && keyOf(v.session) === key ? { ...v, recap: next, error: undefined } : v))
+  } catch (err) {
+    await update($, view, v => (v.session && keyOf(v.session) === key ? { ...v, error: errorText(err) } : v))
+  } finally {
+    await setJob($, key, undefined)
+  }
+}
+
 async function summarize($: EngineInterface, session: SessionRow): Promise<void> {
   const key = keyOf(session)
   if ((await read($, jobs))[key] !== undefined) return
   try {
     await setJob($, key, { step: 'Reading the transcript', done: 0, total: 0 })
     await update($, view, v => (v.session && keyOf(v.session) === key ? { ...v, error: undefined } : v))
-    // The chosen model, else the session's own: the one its provider surely serves.
-    const prefs = (await read($, view)).prefs ?? DEFAULT_PREFS
-    const model = prefs.model !== '' ? prefs.model : await $.session.model()
-    const partModel = prefs.partModel
+    const { model, partModel } = await chosenModel($)
     const previous = await stored($, session)
     // A recap that knows how many prompts it covers is brought up to date
     // from there; any other is written again from the start.
@@ -285,16 +322,7 @@ async function summarize($: EngineInterface, session: SessionRow): Promise<void>
       previous: from > 0 ? previous : undefined,
       notes: noteCache($),
       progress: job => setJob($, key, { ...job, step: `${job.step} with ${model}` }),
-      complete: async request => {
-        const use = request.stage === 'part' && partModel !== '' ? partModel : model
-        const r = await $.model.complete({ ...request, model: use, timeoutMs: 300_000 })
-        if (!r.isAnswered) {
-          const why = r.reason === 'api-error' ? `api-error ${r.status ?? ''}` : r.reason
-          throw new Error(`${use} gave no answer (${why})`)
-        }
-
-        return r.text
-      },
+      complete: completer($, model, partModel),
     })
     const recap: Recap = {
       size: session.size,
@@ -308,7 +336,7 @@ async function summarize($: EngineInterface, session: SessionRow): Promise<void>
     if (session.agent === 'claude') await $.store.delete(`recap:${session.id}`)
     await prune($)
     await update($, view, v => {
-      const intent = oneLine(sectionsOf(markdown).intent, 160)
+      const intent = oneLine(sectionsOf(splitRecap(markdown).markdown).intent, 160)
       const sessions = v.sessions.map(s => (keyOf(s) === key ? { ...s, recap: 'fresh' as const, intent } : s))
 
       return v.session && keyOf(v.session) === key ? { ...v, sessions, recap, error: undefined } : { ...v, sessions }
@@ -488,6 +516,101 @@ export const register: Register = (on, options) => {
           <Text> {job.step}…</Text>
           <Text dimColor>{time}</Text>
         </Text>
+      )
+    }
+
+    // The recap as a journey: phases down a line to where it stands, then the
+    // decisions with what was turned down, then counts that open their lists.
+    const mapView = (map: RecapMap, resume: string | undefined) => {
+      const lists = { shipped: map.shipped, open: map.open, rejected: map.rejected }
+      const label = { shipped: 'Shipped', open: 'Open', rejected: 'Rejected' } as const
+      const statusMark = { done: '✓', open: '◷', paused: '⏸' } as const
+      const statusColor = { done: 'success', open: 'warning', paused: 'warning' } as const
+      const dates = (from?: string, to?: string) =>
+        from === undefined ? '' : to === undefined || to === from ? from.slice(5) : `${from.slice(5)} → ${to.slice(5)}`
+
+      return (
+        <Box flexDirection="column" gap={1}>
+          {map.phases.length > 0 && (
+            <Box flexDirection="column">
+              <Text dimColor size="caption" weight="bold">
+                JOURNEY
+              </Text>
+              {map.phases.map((p, i) => (
+                <Box flexDirection="column">
+                  <Text>
+                    <Text color={p.pivot ? 'warning' : 'claude'}>{p.pivot ? '◆' : '●'} </Text>
+                    <Text weight="semibold">{p.title}</Text>
+                    <Text dimColor>
+                      {'  '}
+                      {dates(p.from, p.to)}
+                      {p.pivot ? '  · pivot' : ''}
+                    </Text>
+                  </Text>
+                  {p.summary !== undefined && (
+                    <Text dimColor size="footnote">
+                      {i < map.phases.length ? '│ ' : '  '}
+                      {p.summary}
+                    </Text>
+                  )}
+                </Box>
+              ))}
+              <Text>
+                <Text color="success">◉ </Text>
+                <Text weight="semibold">You are here</Text>
+              </Text>
+              {resume !== undefined && (
+                <Text dimColor size="footnote">
+                  {'  '}
+                  {oneLine(resume, 200)}
+                </Text>
+              )}
+            </Box>
+          )}
+
+          {map.decisions.length > 0 && (
+            <Box flexDirection="column" gap="sm">
+              <Text dimColor size="caption" weight="bold">
+                DECISIONS
+              </Text>
+              {map.decisions.map(d => (
+                <Box flexDirection="column" borderStyle="round" borderColor="subtle" paddingX={1}>
+                  <Text>
+                    <Text color={statusColor[d.status]}>{statusMark[d.status]} </Text>
+                    <Text weight="semibold">{d.chosen}</Text>
+                  </Text>
+                  {d.rejected.length > 0 && (
+                    <Text dimColor strikethrough>
+                      {d.rejected.join(' · ')}
+                    </Text>
+                  )}
+                  {d.why !== undefined && (
+                    <Text dimColor size="footnote">
+                      {d.why}
+                    </Text>
+                  )}
+                </Box>
+              ))}
+            </Box>
+          )}
+
+          <Box flexDirection="row" gap="sm" flexWrap="wrap">
+            {(['shipped', 'open', 'rejected'] as const).map(k =>
+              choice(
+                `map-${k}`,
+                `${label[k]} ${lists[k].length}`,
+                v.mapList === k,
+                () => void update($, view, w => ({ ...w, mapList: w.mapList === k ? undefined : k })),
+              ),
+            )}
+          </Box>
+          {v.mapList !== undefined &&
+            (lists[v.mapList].length > 0 ? (
+              <Markdown text={lists[v.mapList].map(x => `- ${x}`).join('\n')} />
+            ) : (
+              <Text dimColor>Nothing here.</Text>
+            ))}
+        </Box>
       )
     }
 
@@ -756,7 +879,9 @@ export const register: Register = (on, options) => {
     const job = running[keyOf(s)]
     const recap = v.recap
     const isStale = recap !== undefined && !isSameVersion(recap, s)
-    const parts = recap !== undefined ? sectionsOf(recap.markdown) : {}
+    const split = recap !== undefined ? splitRecap(recap.markdown) : undefined
+    const parts = split !== undefined ? sectionsOf(split.markdown) : {}
+    const mode = v.mode ?? 'recap'
     const isStructured = parts.intent !== undefined
     const section = v.section ?? 'all'
     const detailKeys: SectionKey[] = section === 'all' ? ['ideas', 'changed', 'open'] : [section]
@@ -782,7 +907,7 @@ export const register: Register = (on, options) => {
             {recap !== undefined && (
               <Button
                 key="copy"
-                onPress={pressed => void $.ui.copy({ text: recap.markdown, surface: pressed.surface })}
+                onPress={pressed => void $.ui.copy({ text: split?.markdown ?? '', surface: pressed.surface })}
               >
                 Copy
               </Button>
@@ -834,8 +959,39 @@ export const register: Register = (on, options) => {
           </Box>
         )}
 
-        {recap !== undefined && !isStructured && <Markdown text={recap.markdown} />}
-        {recap !== undefined && isStructured && (
+        {recap !== undefined && (
+          <Box flexDirection="row" gap="sm">
+            {choice(
+              'mode-recap',
+              'Recap',
+              mode === 'recap',
+              () => void update($, view, w => ({ ...w, mode: 'recap' as const })),
+            )}
+            {choice(
+              'mode-map',
+              'Map',
+              mode === 'map',
+              () => void update($, view, w => ({ ...w, mode: 'map' as const })),
+            )}
+          </Box>
+        )}
+
+        {recap !== undefined && mode === 'map' && split?.map !== undefined && mapView(split.map, parts.resume)}
+        {recap !== undefined && mode === 'map' && split?.map === undefined && job === undefined && (
+          <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={1} paddingY="sm">
+            <Text weight="semibold">No map for this recap yet</Text>
+            <Text dimColor>
+              This recap was written before maps. Building one reads only the recap, a small call to{' '}
+              {modelName(v.prefs, v.here)}. Recaps written from now on come with their map.
+            </Text>
+            <Button key="build-map" variant="primary" onPress={() => void buildMap($, s)}>
+              Build map
+            </Button>
+          </Box>
+        )}
+
+        {recap !== undefined && mode === 'recap' && !isStructured && <Markdown text={split?.markdown ?? ''} />}
+        {recap !== undefined && mode === 'recap' && isStructured && (
           <Box flexDirection="column" gap={1}>
             <Box flexDirection="column" gap="xs" borderStyle="round" borderColor="claude" paddingX={1}>
               <Text color="claude" size="caption" weight="bold">

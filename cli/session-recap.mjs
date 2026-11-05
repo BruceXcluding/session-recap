@@ -9,7 +9,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { CHUNK_CHARS, splitParts, writeRecap } from '../core/recap.mjs'
+import { CHUNK_CHARS, splitParts, splitRecap, writeRecap } from '../core/recap.mjs'
 
 /** @typedef {import('../core/recap.mjs').CompleteRequest} CompleteRequest */
 /** @typedef {import('../core/recap.mjs').Digest} Digest */
@@ -509,7 +509,9 @@ async function recap(opts) {
   }
 
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify({ session, markdown, cached: isFresh, usage })}\n`)
+    // The recap's Markdown, and its map as data (null when the model wrote none).
+    const { markdown: text, map } = splitRecap(markdown)
+    process.stdout.write(`${JSON.stringify({ session, markdown: text, map: map ?? null, cached: isFresh, usage })}\n`)
     return
   }
   const meta = [
@@ -518,7 +520,7 @@ async function recap(opts) {
     `active ${ago(session.mtimeMs)}`,
     isFresh ? 'cached recap' : 'new recap',
   ]
-  process.stdout.write(`# ${session.title}\n\n> ${meta.join(' · ')}\n\n${markdown.trim()}\n`)
+  process.stdout.write(`# ${session.title}\n\n> ${meta.join(' · ')}\n\n${splitRecap(markdown).markdown}\n`)
   if (usage.calls > 0) {
     const calls = `${usage.calls} model call${usage.calls === 1 ? '' : 's'}`
     const update = from > 0 ? ` · updated from prompt ${from + 1}` : ''

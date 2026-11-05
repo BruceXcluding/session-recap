@@ -184,7 +184,13 @@ describe('a whole run against a fake model server', () => {
         res.setHeader('content-type', 'application/json')
         res.end(
           JSON.stringify({
-            choices: [{ message: { content: `## Intent\nRecap ${requests.length}.` } }],
+            choices: [
+              {
+                message: {
+                  content: `## Intent\nRecap ${requests.length}.\n\n\`\`\`json recap-map\n{"phases":[{"title":"Build"}],"open":["Ship it"]}\n\`\`\``,
+                },
+              },
+            ],
             usage: { prompt_tokens: 3, completion_tokens: 2 },
           }),
         )
@@ -256,6 +262,15 @@ describe('a whole run against a fake model server', () => {
     assert.match(prompt, /Step 2 of the app/)
     assert.doesNotMatch(prompt, /Step 1 of the app/)
     assert.match(r.err, /updated from prompt 3/)
+  })
+
+  test('the map stays out of the Markdown; --json carries it as data', async () => {
+    const text = await run()
+    assert.doesNotMatch(text.out, /recap-map/)
+    const data = JSON.parse((await run('--json')).out)
+    assert.doesNotMatch(data.markdown, /recap-map/)
+    assert.equal(data.map.phases[0].title, 'Build')
+    assert.deepEqual(data.map.open, ['Ship it'])
   })
 
   test('--dry-run reports the size and calls nothing', async () => {

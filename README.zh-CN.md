@@ -102,6 +102,8 @@ export SESSION_RECAP_PART_MODEL=deepseek-chat    # 可选：长会话分段压�
 
 **Projects** 页面把当前会话所在的项目固定在最上方，其余按"今天 / 本周 / 更早"分组，应用临时创建的 scratch 和 tmp 文件夹会折叠起来。**Claude Code sessions / All agents** 切换显示范围。
 
+**Recap 与 Map：**每份回顾有两种视图。**Recap**（默认）是文字：上方是意图和从哪里继续，下面是决策、改动和遗留问题。**Map** 把同一份回顾画成一段旅程：工作经历的各个阶段按时间排列，转向处用 ◆ 标出，一直到"You are here"；然后是每个关键决策，被放弃的方案划掉并附原因；最后是已交付、未完成和已放弃的数量，点开即可查看列表。Map 的数据由模型在写回顾时一并生成，同一次调用。0.5 之前写的回顾可以点 **Build map**，只读取回顾本身，一次小调用。**Copy** 复制的是文字。
+
 **选择模型：**Projects 页和回顾页上的 **Model** 按钮可以选择写回顾的模型（会话自身的模型、`haiku`、`sonnet` 或 `opus`），并可单独选择压缩长会话分段的模型。别名按会话自身的服务设置解析，所以 `haiku` 就是你的配置把它映射到的模型。选择会跨会话保留，每份回顾都会标明由哪个模型写成。不是别名的模型 id，可在插件设置的 **Recap model** 中填写。
 
 会话列表中每个会话都标出所属 agent 和回顾意图的首行；**All / Claude Code / Codex / dsh / OpenCode** 可筛选列表。● 回顾已就绪 · ◐ 回顾后会话又有进展（点 **Update recap**）· ○ 还没有回顾。
@@ -121,7 +123,7 @@ export SESSION_RECAP_PART_MODEL=deepseek-chat    # 可选：长会话分段压�
 | `echo "$KEY" \| session-recap config set apiKey -` | 从 stdin 读取并保存 API key，不进 shell 历史（文件权限 600） |
 | `session-recap config` | 显示当前生效的设置，key 打码 |
 
-加 `--agent claude|codex|dsh|opencode` 指定 agent，加 `--all` 显示所有 agent，加 `--json` 输出 JSON。`--model` / `--part-model` 只对本次运行覆盖保存的模型。
+加 `--agent claude|codex|dsh|opencode` 指定 agent，加 `--all` 显示所有 agent，加 `--json` 输出 JSON（回顾的 map 数据在 `map` 字段中）。`--model` / `--part-model` 只对本次运行覆盖保存的模型。
 
 ## Token 用量
 

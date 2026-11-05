@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-11-05
+
+### Added
+- **Map view.** A recap now has two views: **Recap** (the text, the default) and **Map**:
+  the work's phases in order with pivots marked down to "You are here", each key
+  decision with the alternatives it turned down and why, and counts of what shipped,
+  what is open and what was rejected, each opening its list.
+- The model writes the map's data with the recap, in the same call, as a fenced
+  `json recap-map` block after the Markdown; it is never shown as text or copied.
+- **Build map** for recaps written before maps: one small call that reads only the recap.
+- CLI: `--json` carries the map under `map`; printed Markdown leaves it out.
+
 ## [0.4.1] - 2026-11-05
 
 ### Changed
@@ -110,6 +122,7 @@ All notable changes to this project are documented here. The format follows
 - Long sessions are condensed in parts in parallel, then merged into one recap.
 - Recaps are cached per session and rewritten only when the session changes.
 
+[0.5.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.5.0
 [0.4.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.4.1
 [0.4.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.4.0
 [0.3.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.3.1

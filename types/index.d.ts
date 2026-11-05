@@ -50,6 +50,10 @@ export type View = {
   here?: { cwd: string; home: string; model: string }
   // Whether the settings card and the temporary folders are open.
   isSettingsOpen?: boolean
+  // The recap shown as Markdown sections (the default) or as the map, and the
+  // map's open list.
+  mode?: 'recap' | 'map'
+  mapList?: 'shipped' | 'open' | 'rejected'
   isTempOpen?: boolean
 }
 
