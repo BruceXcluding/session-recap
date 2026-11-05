@@ -1,7 +1,7 @@
 {
   "name": "session-recap",
-  "version": "0.2.0",
-  "description": "Recap any Claude Code session in a side pane: its intent, key decisions, what changed, open threads and where to resume. Built for long, many-session projects.",
+  "version": "0.3.0",
+  "description": "Recap any AI coding session (Claude Code, Codex, dsh, OpenCode) in a side pane or from the command line: its intent, key decisions, what changed, open threads and where to resume.",
   "author": {
     "name": "BruceXcluding",
     "url": "https://github.com/BruceXcluding"
@@ -9,7 +9,25 @@
   "homepage": "https://github.com/BruceXcluding/session-recap",
   "repository": "https://github.com/BruceXcluding/session-recap",
   "license": "MIT",
-  "keywords": ["session", "summary", "recap", "context", "long-session", "memory", "pane"],
+  "keywords": [
+    "session",
+    "summary",
+    "recap",
+    "context",
+    "long-session",
+    "memory",
+    "codex",
+    "opencode",
+    "dsh"
+  ],
   "icon": "./.claude-plugin/icon.png",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "partModel": {
+      "type": "string",
+      "title": "Model for condensing parts",
+      "description": "Optional cheaper model for the part-by-part step of long sessions (e.g. haiku). Empty: the session's own model.",
+      "default": ""
+    }
+  }
 }

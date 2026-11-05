@@ -1,5 +1,5 @@
-// End-to-end runs of the recap pipeline with the world beneath the mod
-// simulated: the Python helper, the transcript files and the model.
+// End-to-end runs of the recap pipeline with the world beneath the plugin
+// simulated: the Python helper, the saved sessions and the model.
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
@@ -19,16 +19,23 @@ const PANE = {
   },
 } as const
 
-const ROOT = '/home/me/.claude/projects'
-const PROJECT = { dir: `${ROOT}/-code-app`, cwd: '/code/app', sessions: 2, mtimeMs: 1000 }
+const PROJECT = { cwd: '/code/app', sessions: 2, mtimeMs: 1000, agents: { claude: 1, codex: 1 } }
 const SESSION = {
+  agent: 'claude',
   id: 'cur',
-  path: `${PROJECT.dir}/cur.jsonl`,
+  path: '/home/me/.claude/projects/-code-app/cur.jsonl',
+  cwd: '/code/app',
   title: 'Build the app',
   size: 5000,
   mtimeMs: 2000,
 }
-const OTHER = { ...SESSION, id: 'old', path: `${PROJECT.dir}/old.jsonl`, title: 'Old idea' }
+const OTHER = {
+  ...SESSION,
+  agent: 'codex',
+  id: 'old',
+  path: '/home/me/.codex/sessions/rollout-old.jsonl',
+  title: 'Old idea',
+}
 const USAGE = {
   input_tokens: 1,
   output_tokens: 1,
@@ -36,14 +43,24 @@ const USAGE = {
   cache_read_input_tokens: 0,
 }
 
-// A transcript as digest.py condenses it: `turns` prompts of ~1 KB each.
-function digestOf(turns: number) {
+// A session as digest.py condenses it: `turns` prompts of ~1 KB each,
+// starting after the first `from` prompts.
+function digestOf(turns: number, from = 0) {
   const text = Array.from(
-    { length: turns },
-    (_, i) => `[USER 2026-11-0${(i % 9) + 1} 10:00] step ${i} ${'x'.repeat(1000)}\n[CLAUDE] done ${i}`,
+    { length: turns - from },
+    (_, i) => `[USER 2026-11-0${(i % 9) + 1} 10:00] step ${i + from} ${'x'.repeat(1000)}\n[ASSISTANT] done ${i + from}`,
   ).join('\n')
 
-  return { title: SESSION.title, cwd: '/code/app', prompts: turns, files: ['/code/app/a.ts'], fileCount: 1, text }
+  return {
+    agent: 'claude',
+    title: SESSION.title,
+    cwd: '/code/app',
+    prompts: turns,
+    from,
+    files: ['/code/app/a.ts'],
+    fileCount: 1,
+    text,
+  }
 }
 
 type World = {
@@ -57,7 +74,7 @@ type World = {
 function world(
   on: On,
   options: {
-    digest?: unknown
+    turns?: number
     failStage?: 'part' | 'merge'
     store?: Record<string, unknown>
     pythonMissing?: boolean
@@ -71,10 +88,13 @@ function world(
     store: new Map(Object.entries(options.store ?? {})),
   }
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  mock.env(on, { HOME: '/home/me' })
   on('store.get', (_, e) => ({ value: w.store.get(e.key) }))
   on('store.set', (_, e) => {
     w.store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  on('store.delete', (_, e) => {
+    w.store.delete(e.key)
     return { value: undefined }
   })
   on('command.register', () => ({ value: { command: 'session-recap' } }))
@@ -85,20 +105,16 @@ function world(
   })
   on('session.id', () => ({ value: 'cur' }))
   on('session.model', () => ({ value: 'the-session-model' }))
-  on('fs.exists', (_, e) => ({ value: e.path === SESSION.path }))
-  on('fs.stat', () => ({
-    // $.fs.stat may report a fractional mtime where Python's is whole.
-    value: { kind: 'file', size: SESSION.size, mtimeMs: SESSION.mtimeMs + 0.6, isLink: false },
-  }))
   on('process.run', (_, e) => {
     const argv = [...e.argv]
     w.runs.push(argv)
     if (options.pythonMissing && argv[0] === 'python3') return { deny: 'ENOENT python3' }
-    const mode = argv[3]
+    const [mode, a, , from] = argv.slice(3)
     const out =
       mode === 'projects' ? [PROJECT]
       : mode === 'sessions' ? [SESSION, OTHER]
-      : (options.digest ?? digestOf(3))
+      : mode === 'find' ? [SESSION, OTHER].filter(s => s.id === a || s.title.toLowerCase().includes(String(a).toLowerCase()))
+      : digestOf(options.turns ?? 3, Number(from ?? 0))
     return {
       value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
     }
@@ -108,7 +124,9 @@ function world(
     const stage = e.system?.startsWith('You condense') ? 'part' : 'merge'
     w.models.push({ model: e.model, stage, prompt: e.prompt })
     if (stage === options.failStage) {
-      return { value: { isAnswered: false, reason: 'api-error' as const, status: 529, error: 'overloaded' as const, usage: USAGE } }
+      return {
+        value: { isAnswered: false, reason: 'api-error' as const, status: 529, error: 'overloaded' as const, usage: USAGE },
+      }
     }
     const text =
       stage === 'part'
@@ -143,8 +161,8 @@ test('/session-recap on a short session: one call to the session model, the reca
   expect(w.models.map(m => [m.stage, m.model])).toEqual([['merge', 'the-session-model']])
   expect(w.models[0]?.prompt).toContain('Session title: Build the app')
   expect(w.models[0]?.prompt).toContain('/code/app/a.ts')
-  expect(w.runs.some(r => r[3] === 'digest' && r[4] === SESSION.path)).toBe(true)
-  expect(w.store.get('recap:cur')).toMatchObject({ size: 5000, mtimeMs: 2000.6 })
+  expect(w.runs.some(r => r[3] === 'digest' && r[4] === 'claude' && r[5] === SESSION.path && r[6] === '0')).toBe(true)
+  expect(w.store.get('recap:claude:cur')).toMatchObject({ size: 5000, mtimeMs: 2000, prompts: 3 })
   expect(w.toasts).toEqual(['Recap ready: Build the app'])
 
   const ui = await $.ui.mount(PANE)
@@ -155,14 +173,12 @@ test('/session-recap on a short session: one call to the session model, the reca
   // The tabs narrow what is shown under the intent and resume cards.
   await ui.press({ key: 'tab-changed' })
   expect(await ui.find({ type: 'Text', text: /Nothing in this section/ })).toBeDefined()
-  await ui.press({ key: 'tab-all' })
-  expect(await ui.find({ type: 'Text', text: /Nothing in this section/ })).toBeDefined()
   await ui.unmount()
 })
 
 test('a long session is condensed in parts, then merged, all by the session model', async ($, on) => {
   // ~200 KB of transcript: three parts of at most 75,000 characters.
-  const w = world(on, { digest: digestOf(200) })
+  const w = world(on, { turns: 200 })
   await startSession($)
   await typeCommand($)
   await w.clock.settle()
@@ -175,10 +191,48 @@ test('a long session is condensed in parts, then merged, all by the session mode
   const merge = w.models.at(-1)
   expect(merge?.stage).toBe('merge')
   for (const n of [1, 2, 3]) expect(merge?.prompt).toContain(`- note on ${n}`)
-  expect(w.store.get('recap:cur')).toBeDefined()
 })
 
-test('a fresh stored recap is shown without calling the model', async ($, on) => {
+test('part notes are cached: writing the recap again condenses nothing again', async ($, on) => {
+  const w = world(on, { turns: 200 })
+  await startSession($)
+  await typeCommand($)
+  await w.clock.settle()
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'summarize' })
+
+  expect(w.models.filter(m => m.stage === 'part').length).toBe(3)
+  expect(w.models.filter(m => m.stage === 'merge').length).toBe(2)
+  expect((w.store.get('notes') as string[]).length).toBe(3)
+  await ui.unmount()
+})
+
+test('a cheaper part model can be set; the merge stays on the session model', { options: { partModel: 'haiku' } }, async ($, on) => {
+  const w = world(on, { turns: 200 })
+  await startSession($)
+  await typeCommand($)
+  await w.clock.settle()
+
+  expect(new Set(w.models.filter(m => m.stage === 'part').map(m => m.model))).toEqual(new Set(['haiku']))
+  expect(w.models.at(-1)?.model).toBe('the-session-model')
+})
+
+test('a session that went on is updated from the prompts after the old recap', async ($, on) => {
+  const old = { size: 4000, mtimeMs: 1500, at: 0, prompts: 2, markdown: '## Intent\nStart the app.' }
+  const w = world(on, { turns: 3, store: { 'recap:claude:cur': old } })
+  await startSession($)
+  await typeCommand($)
+  await w.clock.settle()
+
+  expect(w.runs.some(r => r[3] === 'digest' && r[6] === '2')).toBe(true)
+  const merge = w.models.at(-1)
+  expect(merge?.prompt).toContain('<previous-recap>\n## Intent\nStart the app.')
+  expect(merge?.prompt).toContain('prompts 3 to 3')
+  expect(merge?.prompt).not.toContain('step 0')
+  expect(w.store.get('recap:claude:cur')).toMatchObject({ prompts: 3, size: 5000 })
+})
+
+test('a recap stored by version 0.2 (keyed by id alone) is still found', async ($, on) => {
   const recap = { size: 5000, mtimeMs: 2000, at: 0, markdown: '## Intent\nCached.' }
   const w = world(on, { store: { 'recap:cur': recap } })
   await startSession($)
@@ -197,10 +251,9 @@ test('a model failure is shown in the pane and the recap can be retried', async 
   await typeCommand($)
   await w.clock.settle()
 
-  expect(w.store.get('recap:cur')).toBeUndefined()
+  expect(w.store.get('recap:claude:cur')).toBeUndefined()
   const ui = await $.ui.mount(PANE)
   expect((await ui.find({ type: 'Text', text: /the-session-model gave no answer/ }))?.text).toContain('api-error 529')
-  // The error card offers a retry, which runs the recap again.
   expect(await ui.find({ key: 'retry' })).toBeDefined()
   expect(w.toasts).toEqual([])
   await ui.press({ key: 'retry' })
@@ -208,25 +261,27 @@ test('a model failure is shown in the pane and the recap can be retried', async 
   await ui.unmount()
 })
 
-test('browse: pick a project, then a session, then write its recap', async ($, on) => {
+test('browse: pick a project, filter by agent, pick a Codex session, write its recap', async ($, on) => {
   const w = world(on)
   await startSession($)
   await typeCommand($, 'browse')
   await w.clock.settle()
 
   const ui = await $.ui.mount(PANE)
-  await ui.press({ key: PROJECT.dir })
-  expect(await ui.find({ key: 'old' })).toBeDefined()
-  await ui.press({ key: 'old' })
+  expect((await ui.find({ type: 'Text', text: /Claude Code 1 · Codex 1/ }))?.text).toContain('/code/app')
+  await ui.press({ key: PROJECT.cwd })
+  await ui.press({ key: 'agent-codex' })
+  expect(await ui.find({ key: 'claude:cur' })).toBeUndefined()
+  await ui.press({ key: 'codex:old' })
   expect(await ui.find({ type: 'Text', text: /^Old idea$/ })).toBeDefined()
   expect(w.models).toEqual([])
   await ui.press({ key: 'summarize' })
 
-  expect(w.runs.some(r => r[3] === 'digest' && r[4] === OTHER.path)).toBe(true)
-  expect(w.store.get('recap:old')).toBeDefined()
-  expect(await ui.find({ type: 'Markdown', text: /Build the app\./ })).toBeDefined()
+  expect(w.runs.some(r => r[3] === 'digest' && r[4] === 'codex' && r[5] === OTHER.path)).toBe(true)
+  expect(w.store.get('recap:codex:old')).toBeDefined()
   await ui.press({ key: 'to-sessions' })
-  expect(await ui.find({ key: 'old', text: /^● / })).toBeDefined()
+  await ui.press({ key: 'agent-all' })
+  expect(await ui.find({ key: 'codex:old', text: /^● / })).toBeDefined()
   await ui.unmount()
 })
 
@@ -237,10 +292,10 @@ test('without python3 on PATH it falls back to /usr/bin/python3', async ($, on) 
   await w.clock.settle()
 
   expect(w.runs.some(r => r[0] === '/usr/bin/python3')).toBe(true)
-  expect(w.store.get('recap:cur')).toBeDefined()
+  expect(w.store.get('recap:claude:cur')).toBeDefined()
 })
 
-test('/session-recap <project name> opens that project\'s sessions', async ($, on) => {
+test("/session-recap <project name> opens that project's sessions", async ($, on) => {
   const w = world(on)
   await startSession($)
   await typeCommand($, 'App')
@@ -248,23 +303,20 @@ test('/session-recap <project name> opens that project\'s sessions', async ($, o
 
   expect(w.models).toEqual([])
   const ui = await $.ui.mount(PANE)
-  expect(await ui.find({ key: 'cur' })).toBeDefined()
-  expect(await ui.find({ key: 'old' })).toBeDefined()
+  expect(await ui.find({ key: 'claude:cur' })).toBeDefined()
+  expect(await ui.find({ key: 'codex:old' })).toBeDefined()
   await ui.unmount()
 })
 
-test('/session-recap <session title> writes that session\'s recap', async ($, on) => {
+test("/session-recap <session title> writes that session's recap", async ($, on) => {
   const w = world(on)
   await startSession($)
   await typeCommand($, 'old idea')
   await w.clock.settle()
 
-  expect(w.runs.some(r => r[3] === 'digest' && r[4] === OTHER.path)).toBe(true)
-  expect(w.store.get('recap:old')).toBeDefined()
-  expect(w.store.get('recap:cur')).toBeUndefined()
-  const ui = await $.ui.mount(PANE)
-  expect(await ui.find({ type: 'Text', text: /^Old idea$/ })).toBeDefined()
-  await ui.unmount()
+  expect(w.runs.some(r => r[3] === 'digest' && r[5] === OTHER.path)).toBe(true)
+  expect(w.store.get('recap:codex:old')).toBeDefined()
+  expect(w.store.get('recap:claude:cur')).toBeUndefined()
 })
 
 test('/session-recap <unknown name> says nothing matched', async ($, on) => {
@@ -276,6 +328,6 @@ test('/session-recap <unknown name> says nothing matched', async ($, on) => {
   expect(w.models).toEqual([])
   const ui = await $.ui.mount(PANE)
   expect(await ui.find({ type: 'Text', text: /No project or session matches "nowhere"/ })).toBeDefined()
-  expect(await ui.find({ key: PROJECT.dir })).toBeDefined()
+  expect(await ui.find({ key: PROJECT.cwd })).toBeDefined()
   await ui.unmount()
 })

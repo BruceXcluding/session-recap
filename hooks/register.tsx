@@ -1,20 +1,30 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import { writeRecap } from '../core/recap.mjs'
+import type { Digest } from '../core/recap.mjs'
 import type { Job, ProjectRow, Recap, SessionRow, View } from '../types'
 
 const PANE = 'session-recap'
 const TITLE = 'Session recap'
-const CHUNK_CHARS = 75_000
-const SESSIONS_SHOWN = 40
+const SESSIONS_SHOWN = 60
+// Part notes kept for retries and repeats; each is a few KB of the store's 4 MiB.
+const NOTES_KEPT = 150
+
+const AGENT_LABEL: Record<string, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  dsh: 'dsh',
+  opencode: 'OpenCode',
+}
 
 const view = atom(
   { plugin: 'session-recap', key: 'view' } as const,
   { screen: 'projects', projects: [], sessions: [] },
-  { shape: 'view-2' },
+  { shape: 'view-3' },
 )
 const jobs = atom({ plugin: 'session-recap', key: 'jobs' } as const, {}, {
-  shape: 'jobs-2',
+  shape: 'jobs-3',
 })
 
 type SectionKey = 'intent' | 'ideas' | 'changed' | 'open' | 'resume'
@@ -49,8 +59,8 @@ function oneLine(text: string | undefined, max: number): string | undefined {
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`
 }
 
-// A file's mtime is whole milliseconds from Python and may be fractional from
-// $.fs.stat, so versions compare within a second.
+// A file's mtime may come back with or without its fraction, so versions
+// compare within a second.
 function isSameVersion(a: { size: number; mtimeMs: number }, b: { size: number; mtimeMs: number }): boolean {
   return a.size === b.size && Math.abs(a.mtimeMs - b.mtimeMs) < 1000
 }
@@ -59,56 +69,16 @@ function errorText(err: unknown): string {
   return String(err).replace(/^Error: /, '')
 }
 
-type Digest = {
-  title?: string
-  cwd?: string
-  branch?: string
-  firstTs?: string
-  lastTs?: string
-  prompts: number
-  files: string[]
-  fileCount: number
-  text: string
+function keyOf(s: { agent: string; id: string }): string {
+  return `${s.agent}:${s.id}`
 }
 
-const RECAP_FORMAT = `Write the recap in Markdown with exactly these sections:
-
-## Intent
-One or two sentences: what the person was ultimately trying to achieve.
-
-## Key ideas and decisions
-Bullets. Each: the decision or insight, and why it was chosen (the reason, the alternative rejected).
-
-## What changed
-Bullets: concrete outputs (files, features, documents, commits, PRs, artifacts). Say "nothing yet" if none.
-
-## Open threads
-Bullets: unfinished work, unverified claims, unanswered questions, known problems.
-
-## Where to resume
-One or two sentences: the most sensible next step if the person picked this up today.
-
-Be specific (names, numbers, files), not generic. Write in the language the person mostly writes in.`
-
-const CHUNK_SYSTEM =
-  'You condense one part of a long working session between a person and Claude (an AI coding assistant) into notes another model will merge. ' +
-  'Lines tagged [USER] are the person, [CLAUDE] the assistant, "·" lines are tool calls. Keep facts, never invent.'
-
-const MERGE_SYSTEM =
-  'You write a recap of a working session between a person and Claude (an AI coding assistant) so the person can remember it quickly. ' +
-  'Lines tagged [USER] are the person, [CLAUDE] the assistant, "·" lines are tool calls. Never invent facts.'
-
-async function python(
-  $: EngineInterface,
-  args: string[],
-): Promise<unknown> {
+async function python($: EngineInterface, args: string[]): Promise<unknown> {
   const script = `${$.plugin.root}/hooks/digest.py`
   let lastError = ''
   for (const exe of ['python3', '/usr/bin/python3']) {
     try {
-      const r = await $.process.run([exe, '-I', script, ...args], {
-        timeoutMs: 120_000,
-      })
+      const r = await $.process.run([exe, '-I', script, ...args], { timeoutMs: 180_000 })
       if (r.exitCode === 0) return JSON.parse(r.stdout)
       lastError = r.stderr.trim().split('\n').at(-1) ?? `exit ${r.exitCode}`
     } catch (err) {
@@ -118,24 +88,18 @@ async function python(
   throw new Error(`digest.py failed: ${lastError}`)
 }
 
-async function projectsRoot($: EngineInterface): Promise<string> {
-  const config = await $.env.get('CLAUDE_CONFIG_DIR')
-  const home = await $.env.get('HOME')
+async function stored($: EngineInterface, s: { agent: string; id: string }): Promise<Recap | undefined> {
+  const recap = (await $.store.get(`recap:${keyOf(s)}`)) as Recap | undefined
+  // Version 0.2 kept Claude Code recaps under the session id alone.
+  if (recap === undefined && s.agent === 'claude') return (await $.store.get(`recap:${s.id}`)) as Recap | undefined
 
-  return `${config ?? `${home}/.claude`}/projects`
+  return recap
 }
 
-async function stored($: EngineInterface, id: string): Promise<Recap | undefined> {
-  return (await $.store.get(`recap:${id}`)) as Recap | undefined
-}
-
-async function withRecapMarks(
-  $: EngineInterface,
-  rows: SessionRow[],
-): Promise<SessionRow[]> {
+async function withRecapMarks($: EngineInterface, rows: SessionRow[]): Promise<SessionRow[]> {
   return Promise.all(
     rows.map(async row => {
-      const recap = await stored($, row.id)
+      const recap = await stored($, row)
       if (recap === undefined) return row
       const intent = oneLine(sectionsOf(recap.markdown).intent, 160)
 
@@ -146,7 +110,7 @@ async function withRecapMarks(
 
 async function showProjects($: EngineInterface): Promise<void> {
   try {
-    const projects = (await python($, ['projects', await projectsRoot($)])) as ProjectRow[]
+    const projects = (await python($, ['projects'])) as ProjectRow[]
     await update($, view, v => ({ ...v, screen: 'projects' as const, projects, error: undefined }))
   } catch (err) {
     await update($, view, v => ({ ...v, screen: 'projects' as const, error: errorText(err) }))
@@ -155,13 +119,14 @@ async function showProjects($: EngineInterface): Promise<void> {
 
 async function showSessions($: EngineInterface, project: ProjectRow): Promise<void> {
   try {
-    const rows = (await python($, ['sessions', project.dir])) as SessionRow[]
+    const rows = (await python($, ['sessions', project.cwd])) as SessionRow[]
     const sessions = await withRecapMarks($, rows.slice(0, SESSIONS_SHOWN))
     await update($, view, v => ({
       ...v,
       screen: 'sessions' as const,
       project,
       sessions,
+      agent: v.project?.cwd === project.cwd ? v.agent : undefined,
       error: undefined,
     }))
   } catch (err) {
@@ -170,7 +135,7 @@ async function showSessions($: EngineInterface, project: ProjectRow): Promise<vo
 }
 
 async function showRecap($: EngineInterface, session: SessionRow): Promise<void> {
-  const recap = await stored($, session.id)
+  const recap = await stored($, session)
   await update($, view, v => ({
     ...v,
     screen: 'recap' as const,
@@ -181,151 +146,104 @@ async function showRecap($: EngineInterface, session: SessionRow): Promise<void>
   }))
 }
 
-function chunks(text: string): string[] {
-  const out: string[] = []
-  let rest = text
-  while (rest.length > CHUNK_CHARS) {
-    // Cut at a prompt boundary so a turn is not split across chunks.
-    let cut = rest.lastIndexOf('\n[USER ', CHUNK_CHARS)
-    if (cut < CHUNK_CHARS / 2) cut = CHUNK_CHARS
-    out.push(rest.slice(0, cut))
-    rest = rest.slice(cut)
-  }
-  out.push(rest)
-
-  return out
-}
-
-function header(d: Digest): string {
-  const lines = [
-    `Session title: ${d.title ?? '(none)'}`,
-    `Working directory: ${d.cwd ?? '?'}${d.branch ? ` (branch ${d.branch})` : ''}`,
-    `Time span: ${d.firstTs ?? '?'} to ${d.lastTs ?? '?'}, ${d.prompts} prompts from the person`,
-  ]
-  if (d.fileCount > 0) {
-    lines.push(`Files edited (${d.fileCount}, newest last): ${d.files.join(', ')}`)
-  }
-
-  return lines.join('\n')
-}
-
-async function complete(
-  $: EngineInterface,
-  model: string,
-  system: string,
-  prompt: string,
-  maxTokens: number,
-): Promise<string> {
-  const r = await $.model.complete({ model, system, prompt, maxTokens, timeoutMs: 300_000 })
-  if (!r.isAnswered) {
-    const why = r.reason === 'api-error' ? `api-error ${r.status ?? ''}` : r.reason
-    throw new Error(`${model} gave no answer (${why})`)
-  }
-
-  return r.text
-}
-
-async function setJob($: EngineInterface, id: string, job: Job | undefined): Promise<void> {
+async function setJob($: EngineInterface, key: string, job: Job | undefined): Promise<void> {
   await update($, jobs, all => {
     const next = { ...all }
-    if (job === undefined) delete next[id]
-    else next[id] = job
+    if (job === undefined) delete next[key]
+    else next[key] = job
 
     return next
   })
 }
 
-async function summarize($: EngineInterface, session: SessionRow): Promise<void> {
-  if ((await read($, jobs))[session.id] !== undefined) return
+// Part notes by content hash, the oldest dropped past NOTES_KEPT.
+function noteCache($: EngineInterface) {
+  return {
+    get: async (key: string) => (await $.store.get(`note:${key}`)) as string | undefined,
+    set: async (key: string, note: string) => {
+      await $.store.set(`note:${key}`, note)
+      const order = ((await $.store.get('notes')) as string[] | undefined) ?? []
+      const next = [...order.filter(k => k !== key), key]
+      for (const old of next.splice(0, Math.max(0, next.length - NOTES_KEPT))) {
+        await $.store.delete(`note:${old}`)
+      }
+      await $.store.set('notes', next)
+    },
+  }
+}
+
+async function summarize($: EngineInterface, session: SessionRow, partModel: string): Promise<void> {
+  const key = keyOf(session)
+  if ((await read($, jobs))[key] !== undefined) return
   try {
-    await setJob($, session.id, { step: 'Reading the transcript', done: 0, total: 0 })
-    await update($, view, v => (v.session?.id === session.id ? { ...v, error: undefined } : v))
+    await setJob($, key, { step: 'Reading the transcript', done: 0, total: 0 })
+    await update($, view, v => (v.session && keyOf(v.session) === key ? { ...v, error: undefined } : v))
     // The session's own model: the one the person's provider surely serves.
     const model = await $.session.model()
-    const before = await $.fs.stat(session.path)
-    const d = (await python($, ['digest', session.path])) as Digest
-    const meta = header(d)
-    const parts = chunks(d.text)
-    let body: string
-    if (parts.length === 1) {
-      await setJob($, session.id, { step: `Writing the recap with ${model}`, done: 0, total: 1 })
-      body = `${meta}\n\n<transcript>\n${d.text}\n</transcript>`
-    } else {
-      let done = 0
-      const total = parts.length + 1
-      await setJob($, session.id, { step: `Condensing ${parts.length} parts with ${model}`, done: 0, total })
-      const notes = await Promise.all(
-        parts.map(async (part, i) => {
-          const note = await complete(
-            $,
-            model,
-            CHUNK_SYSTEM,
-            `${meta}\n\nThis is part ${i + 1} of ${parts.length}.\n\n<transcript-part>\n${part}\n</transcript-part>\n\n` +
-              'Write terse bullet notes on this part: what the person asked for and why, ideas and decisions with their reasons, ' +
-              'what was built or changed, problems hit, and anything left unresolved at the end of the part. ' +
-              'Keep names, numbers and file paths. Write in the language the person writes in.',
-            2500,
-          )
-          done += 1
-          await setJob($, session.id, {
-            step: `Condensed ${done} of ${parts.length} parts`,
-            done,
-            total,
-          })
+    const previous = await stored($, session)
+    // A recap that knows how many prompts it covers is brought up to date
+    // from there; any other is written again from the start.
+    const from = previous?.prompts !== undefined && !isSameVersion(previous, session) ? previous.prompts : 0
+    const digest = (await python($, ['digest', session.agent, session.path, String(from)])) as Digest
+    const markdown = await writeRecap({
+      digest,
+      previous: from > 0 ? previous : undefined,
+      notes: noteCache($),
+      progress: job => setJob($, key, { ...job, step: `${job.step} with ${model}` }),
+      complete: async request => {
+        const use = request.stage === 'part' && partModel !== '' ? partModel : model
+        const r = await $.model.complete({ ...request, model: use, timeoutMs: 300_000 })
+        if (!r.isAnswered) {
+          const why = r.reason === 'api-error' ? `api-error ${r.status ?? ''}` : r.reason
+          throw new Error(`${use} gave no answer (${why})`)
+        }
 
-          return `### Part ${i + 1} of ${parts.length}\n${note}`
-        }),
-      )
-      await setJob($, session.id, { step: `Writing the recap with ${model}`, done: parts.length, total })
-      body = `${meta}\n\nNotes on the session, part by part in time order:\n\n${notes.join('\n\n')}`
+        return r.text
+      },
+    })
+    const recap: Recap = {
+      size: session.size,
+      mtimeMs: session.mtimeMs,
+      at: Date.now(),
+      markdown,
+      prompts: digest.prompts,
     }
-    const markdown = await complete(
-      $,
-      model,
-      MERGE_SYSTEM,
-      `${body}\n\n${RECAP_FORMAT}\nLater parts override earlier ones where the person changed course.`,
-      3000,
-    )
-    const recap: Recap = { size: before.size, mtimeMs: before.mtimeMs, at: Date.now(), markdown }
-    await $.store.set(`recap:${session.id}`, recap)
+    await $.store.set(`recap:${key}`, recap)
     await update($, view, v => {
       const intent = oneLine(sectionsOf(markdown).intent, 160)
-      const sessions = v.sessions.map(s =>
-        s.id === session.id ? { ...s, recap: 'fresh' as const, intent } : s,
-      )
-      return v.session?.id === session.id
-        ? { ...v, sessions, recap, error: undefined }
-        : { ...v, sessions }
+      const sessions = v.sessions.map(s => (keyOf(s) === key ? { ...s, recap: 'fresh' as const, intent } : s))
+
+      return v.session && keyOf(v.session) === key ? { ...v, sessions, recap, error: undefined } : { ...v, sessions }
     })
-    await setJob($, session.id, undefined)
+    await setJob($, key, undefined)
     $.ui.toast(`Recap ready: ${session.title.slice(0, 60)}`)
   } catch (err) {
-    await setJob($, session.id, undefined)
-    await update($, view, v =>
-      v.session?.id === session.id ? { ...v, error: errorText(err) } : v,
-    )
+    await setJob($, key, undefined)
+    await update($, view, v => (v.session && keyOf(v.session) === key ? { ...v, error: errorText(err) } : v))
   }
+}
+
+async function useSession($: EngineInterface, session: SessionRow): Promise<SessionRow> {
+  const projects = (await python($, ['projects'])) as ProjectRow[]
+  const project = projects.find(p => p.cwd === session.cwd)
+  const rows = (await python($, ['sessions', session.cwd])) as SessionRow[]
+  const sessions = await withRecapMarks($, rows.slice(0, SESSIONS_SHOWN))
+  await update($, view, v => ({ ...v, projects, project, sessions, agent: undefined }))
+
+  return sessions.find(s => keyOf(s) === keyOf(session)) ?? (await withRecapMarks($, [session]))[0] ?? session
 }
 
 async function currentSession($: EngineInterface): Promise<SessionRow | undefined> {
   const id = await $.session.id()
-  const projects = (await python($, ['projects', await projectsRoot($)])) as ProjectRow[]
-  for (const project of projects) {
-    const path = `${project.dir}/${id}.jsonl`
-    if (!(await $.fs.exists(path))) continue
-    const rows = (await python($, ['sessions', project.dir])) as SessionRow[]
-    const sessions = await withRecapMarks($, rows.slice(0, SESSIONS_SHOWN))
-    await update($, view, v => ({ ...v, projects, project, sessions }))
+  const hits = (await python($, ['find', id])) as SessionRow[]
+  const hit = hits.find(s => s.agent === 'claude' && s.id === id)
 
-    return sessions.find(s => s.id === id)
-  }
-
-  return undefined
+  return hit === undefined ? undefined : useSession($, hit)
 }
 
 function ago(ms: number): string {
   const min = Math.round((Date.now() - ms) / 60_000)
-  if (min < 60) return `${min}m ago`
+  if (min < 60) return `${Math.max(0, min)}m ago`
   if (min < 48 * 60) return `${Math.round(min / 60)}h ago`
 
   return `${Math.round(min / 1440)}d ago`
@@ -339,40 +257,31 @@ function baseName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path
 }
 
-type Found =
-  | { kind: 'project'; project: ProjectRow }
-  | { kind: 'session'; project: ProjectRow; session: SessionRow }
+type Found = { kind: 'project'; project: ProjectRow } | { kind: 'session'; session: SessionRow }
 
 // A project whose folder name holds the query wins; else a session whose
-// title does, newest project first.
+// title or id does, newest first.
 async function findByName($: EngineInterface, query: string): Promise<Found | undefined> {
   const q = query.toLowerCase()
-  const projects = (await python($, ['projects', await projectsRoot($)])) as ProjectRow[]
+  const projects = (await python($, ['projects'])) as ProjectRow[]
   await update($, view, v => ({ ...v, projects }))
   const project =
     projects.find(p => baseName(p.cwd).toLowerCase() === q) ??
     projects.find(p => baseName(p.cwd).toLowerCase().includes(q))
   if (project !== undefined) return { kind: 'project', project }
-  for (const p of projects) {
-    const rows = (await python($, ['sessions', p.dir])) as SessionRow[]
-    const hit = rows.find(s => s.title.toLowerCase().includes(q))
-    if (hit === undefined) continue
-    const sessions = await withRecapMarks($, rows.slice(0, SESSIONS_SHOWN))
-    await update($, view, v => ({ ...v, project: p, sessions }))
-    const [session] = await withRecapMarks($, [hit])
+  const [hit] = (await python($, ['find', query])) as SessionRow[]
 
-    return { kind: 'session', project: p, session: session ?? hit }
-  }
-
-  return undefined
+  return hit === undefined ? undefined : { kind: 'session', session: await useSession($, hit) }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const partModel = typeof options.partModel === 'string' ? options.partModel.trim() : ''
+
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'session-recap',
       description:
-        'Recap this session; "/session-recap browse" lists every project, "/session-recap <name>" opens a project or session by name',
+        'Recap this session; "/session-recap browse" lists every project and agent, "/session-recap <name>" opens a project or session by name',
       argumentHint: '[browse | project or session name]',
     })
 
@@ -398,7 +307,7 @@ export const register: Register = on => {
         return { text: `Showing the sessions of ${baseName(found.project.cwd)}.` }
       }
       await showRecap($, found.session)
-      if (found.session.recap !== 'fresh') void summarize($, found.session)
+      if (found.session.recap !== 'fresh') void summarize($, found.session, partModel)
       return { text: `Writing a recap of "${found.session.title.slice(0, 60)}".` }
     }
     const session = await currentSession($)
@@ -407,7 +316,7 @@ export const register: Register = on => {
       return { text: 'This session has no saved transcript yet; showing all projects.' }
     }
     await showRecap($, session)
-    if (session.recap !== 'fresh') void summarize($, session)
+    if (session.recap !== 'fresh') void summarize($, session, partModel)
 
     return { text: 'Writing a recap of this session in the Session recap pane.' }
   }).catch(() => ({ text: 'Session recap could not open; see the debug log.' }))
@@ -439,26 +348,35 @@ export const register: Register = on => {
         </Box>
       )
 
+    const agentsLine = (agents: Record<string, number>) =>
+      Object.entries(agents)
+        .map(([agent, n]) => `${AGENT_LABEL[agent] ?? agent} ${n}`)
+        .join(' · ')
+
     if (v.screen === 'projects') {
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="column">
             <Text size="heading" weight="bold">Projects</Text>
-            <Text dimColor size="footnote">Pick a project to see its sessions, newest first.</Text>
+            <Text dimColor size="footnote">
+              Sessions from Claude Code, Codex, dsh and OpenCode, by project folder, newest first.
+            </Text>
           </Box>
           {errorCard()}
           {v.projects.length === 0 && v.error === undefined && <Text dimColor>Loading projects…</Text>}
           <Box flexDirection="column" gap="sm">
             {v.projects.map(p => (
               <Box flexDirection="column">
-                <Button key={p.dir} plain onPress={() => void showSessions($, p)}>
+                <Button key={p.cwd} plain onPress={() => void showSessions($, p)}>
                   <Text weight="semibold">{baseName(p.cwd)}</Text>
                   {'  '}
                   <Text dimColor>
                     {p.sessions} {p.sessions === 1 ? 'session' : 'sessions'} · {ago(p.mtimeMs)}
                   </Text>
                 </Button>
-                <Text dimColor size="footnote">{p.cwd}</Text>
+                <Text dimColor size="footnote">
+                  {agentsLine(p.agents)} · {p.cwd}
+                </Text>
               </Box>
             ))}
           </Box>
@@ -468,6 +386,9 @@ export const register: Register = on => {
 
     if (v.screen === 'sessions') {
       const recapped = v.sessions.filter(s => s.recap !== undefined).length
+      const agents = [...new Set(v.sessions.map(s => s.agent))]
+      const shown = v.sessions.filter(s => v.agent === undefined || s.agent === v.agent)
+      const filter = (agent: string | undefined) => () => void update($, view, w => ({ ...w, agent }))
 
       return (
         <Box flexDirection="column" gap={1}>
@@ -480,10 +401,26 @@ export const register: Register = on => {
               {v.sessions.length} sessions · {recapped} recapped
             </Text>
           </Box>
+          {agents.length > 1 && (
+            <Box flexDirection="row" gap="sm" flexWrap="wrap">
+              <Button key="agent-all" variant={v.agent === undefined ? 'primary' : 'secondary'} onPress={filter(undefined)}>
+                All
+              </Button>
+              {agents.map(agent => (
+                <Button
+                  key={`agent-${agent}`}
+                  variant={v.agent === agent ? 'primary' : 'secondary'}
+                  onPress={filter(agent)}
+                >
+                  {AGENT_LABEL[agent] ?? agent}
+                </Button>
+              ))}
+            </Box>
+          )}
           {errorCard()}
           <Box flexDirection="column" gap="sm">
-            {v.sessions.map(s => {
-              const job = running[s.id]
+            {shown.map(s => {
+              const job = running[keyOf(s)]
               const mark =
                 s.recap === 'fresh' ? <Text color="success">●</Text>
                 : s.recap === 'stale' ? <Text color="warning">◐</Text>
@@ -491,11 +428,11 @@ export const register: Register = on => {
 
               return (
                 <Box flexDirection="column">
-                  <Button key={s.id} plain onPress={() => void showRecap($, s)}>
-                    {mark} <Text weight="semibold">{s.title.slice(0, Math.max(20, width - 24))}</Text>
+                  <Button key={keyOf(s)} plain onPress={() => void showRecap($, s)}>
+                    {mark} <Text weight="semibold">{s.title.slice(0, Math.max(20, width - 34))}</Text>
                     {'  '}
                     <Text dimColor>
-                      {ago(s.mtimeMs)} · {megabytes(s.size)}
+                      {AGENT_LABEL[s.agent] ?? s.agent} · {ago(s.mtimeMs)} · {megabytes(s.size)}
                     </Text>
                   </Button>
                   {job !== undefined ? (
@@ -514,7 +451,7 @@ export const register: Register = on => {
 
     const s = v.session
     if (s === undefined) return <Text dimColor>No session picked.</Text>
-    const job = running[s.id]
+    const job = running[keyOf(s)]
     const recap = v.recap
     const isStale = recap !== undefined && !isSameVersion(recap, s)
     const parts = recap !== undefined ? sectionsOf(recap.markdown) : {}
@@ -524,9 +461,8 @@ export const register: Register = on => {
     const details = SECTIONS.filter(x => detailKeys.includes(x.key) && parts[x.key] !== undefined)
       .map(x => (section === 'all' ? `### ${x.label}\n\n${parts[x.key]}` : (parts[x.key] ?? '')))
       .join('\n\n')
-    const pick = (next: NonNullable<View['section']>) => () =>
-      void update($, view, w => ({ ...w, section: next }))
-    const write = () => void summarize($, s)
+    const pick = (next: NonNullable<View['section']>) => () => void update($, view, w => ({ ...w, section: next }))
+    const write = () => void summarize($, s, partModel)
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -541,7 +477,7 @@ export const register: Register = on => {
               </Button>
               {job === undefined && (
                 <Button key="summarize" variant={isStale ? 'primary' : 'secondary'} onPress={write}>
-                  Refresh recap
+                  {isStale ? 'Update recap' : 'Refresh recap'}
                 </Button>
               )}
             </Box>
@@ -551,7 +487,7 @@ export const register: Register = on => {
         <Box flexDirection="column">
           <Text size="title" weight="bold">{s.title}</Text>
           <Text dimColor size="footnote">
-            {baseName(v.project?.cwd ?? '')} · {megabytes(s.size)} · active {ago(s.mtimeMs)}
+            {AGENT_LABEL[s.agent] ?? s.agent} · {baseName(s.cwd)} · {megabytes(s.size)} · active {ago(s.mtimeMs)}
             {recap ? ` · recap from ${ago(recap.at)}` : ''}
           </Text>
         </Box>
@@ -565,7 +501,7 @@ export const register: Register = on => {
         {errorCard(job === undefined ? write : undefined)}
         {isStale && job === undefined && (
           <Text color="warning" size="footnote">
-            The session has continued since this recap. Refresh to include the newer part.
+            The session has continued since this recap. Update reads only the newer part.
           </Text>
         )}
 
@@ -597,11 +533,7 @@ export const register: Register = on => {
             )}
             <Box flexDirection="row" gap="sm" flexWrap="wrap">
               {(['all', 'ideas', 'changed', 'open'] as const).map(key => (
-                <Button
-                  key={`tab-${key}`}
-                  variant={section === key ? 'primary' : 'secondary'}
-                  onPress={pick(key)}
-                >
+                <Button key={`tab-${key}`} variant={section === key ? 'primary' : 'secondary'} onPress={pick(key)}>
                   {key === 'all' ? 'All' : (SECTIONS.find(x => x.key === key)?.label ?? key)}
                 </Button>
               ))}

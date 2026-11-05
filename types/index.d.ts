@@ -1,13 +1,17 @@
+// One project folder, with its sessions from every agent.
 export type ProjectRow = {
-  dir: string
   cwd: string
   sessions: number
   mtimeMs: number
+  // Sessions per agent: claude, codex, dsh, opencode.
+  agents: Record<string, number>
 }
 
 export type SessionRow = {
+  agent: string
   id: string
   path: string
+  cwd: string
   title: string
   size: number
   mtimeMs: number
@@ -22,6 +26,8 @@ export type Recap = {
   mtimeMs: number
   at: number
   markdown: string
+  // How many prompts the recap covers: a refresh recaps only the ones after.
+  prompts?: number
 }
 
 export type View = {
@@ -29,6 +35,8 @@ export type View = {
   projects: ProjectRow[]
   project?: ProjectRow
   sessions: SessionRow[]
+  // Which agent's sessions the list shows; absent, all of them.
+  agent?: string
   session?: SessionRow
   recap?: Recap
   // Which part of the recap is shown below the intent and resume cards.
@@ -42,7 +50,7 @@ declare module 'claude-code' {
   interface PluginState {
     'session-recap': {
       view: Shaped<View>
-      // Progress per session id while a recap is being written.
+      // Progress per session key (agent:id) while a recap is being written.
       jobs: Shaped<Record<string, Job>>
     }
   }

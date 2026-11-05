@@ -1,0 +1,32 @@
+{
+  "name": "session-recap",
+  "version": "0.3.0",
+  "description": "Recap any AI coding session (Claude Code, Codex, dsh, OpenCode): its intent, key decisions, what changed, open threads and where to resume.",
+  "type": "module",
+  "bin": {
+    "session-recap": "cli/session-recap.mjs"
+  },
+  "files": [
+    "cli/",
+    "core/",
+    "hooks/digest.py",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/cli.test.mjs && python3 -m unittest discover -s tests -p 'test_*.py'"
+  },
+  "keywords": ["claude-code", "codex", "opencode", "dsh", "session", "recap", "summary", "cli"],
+  "author": "BruceXcluding",
+  "license": "MIT",
+  "homepage": "https://github.com/BruceXcluding/session-recap",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BruceXcluding/session-recap.git"
+  },
+  "bugs": "https://github.com/BruceXcluding/session-recap/issues"
+}

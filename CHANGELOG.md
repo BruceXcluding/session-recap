@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-11-05
+
+### Added
+- **More agents.** Sessions from Codex, dsh (deepseek-harness) and OpenCode are read
+  beside Claude Code's, grouped by project folder, with an agent filter in the pane.
+- **Command-line tool** `session-recap` (`npm install -g github:BruceXcluding/session-recap`):
+  recap, `list`, `projects`, `--dry-run`, `config`, and `install`, which adds a
+  session-recap skill to Codex, OpenCode and `~/.agents/skills`. It calls an
+  Anthropic or OpenAI-compatible model you configure.
+- **Incremental updates:** a session that continued is recapped from the prompts
+  after its last recap, merged into that recap.
+- **Part notes cache:** condensed parts are cached by content hash.
+- Optional cheaper model for condensing parts (`partModel` plugin setting,
+  `SESSION_RECAP_PART_MODEL`).
+
+### Changed
+- The condensed transcript keeps every prompt, the agent's last reply of each turn,
+  commits, pushes and PRs, and the edited files; tool calls that only read and
+  intermediate replies are left out. About 63% fewer input tokens on a 179 MB session.
+- Session listing is indexed under `~/.cache/session-recap` and re-reads only
+  changed files.
+
 ## [0.2.0] - 2026-11-05
 
 ### Added
@@ -35,4 +57,5 @@ All notable changes to this project are documented here. The format follows
 - Long sessions are condensed in parts in parallel, then merged into one recap.
 - Recaps are cached per session and rewritten only when the session changes.
 
+[0.3.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.3.0
 [0.2.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.2.0

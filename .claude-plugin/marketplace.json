@@ -5,18 +5,30 @@
     "url": "https://github.com/BruceXcluding"
   },
   "metadata": {
-    "description": "session-recap: remember what every Claude Code session was for, even after months and hundreds of MB of transcript."
+    "description": "session-recap: remember what every AI coding session was for (Claude Code, Codex, dsh, OpenCode), even after months and hundreds of MB of transcript."
   },
   "plugins": [
     {
       "name": "session-recap",
       "source": "./",
-      "description": "Recap any Claude Code session in a side pane: its intent, key decisions, what changed, open threads and where to resume.",
-      "version": "0.2.0",
-      "author": { "name": "BruceXcluding" },
+      "description": "Recap any AI coding session (Claude Code, Codex, dsh, OpenCode) in a side pane: its intent, key decisions, what changed, open threads and where to resume.",
+      "version": "0.3.0",
+      "author": {
+        "name": "BruceXcluding"
+      },
       "homepage": "https://github.com/BruceXcluding/session-recap",
       "license": "MIT",
-      "keywords": ["session", "summary", "recap", "context", "long-session", "memory", "pane"]
+      "keywords": [
+        "session",
+        "summary",
+        "recap",
+        "context",
+        "long-session",
+        "memory",
+        "codex",
+        "opencode",
+        "dsh"
+      ]
     }
   ]
 }
