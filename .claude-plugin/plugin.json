@@ -1,6 +1,6 @@
 {
   "name": "session-recap",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Recap any AI coding session (Claude Code, Codex, dsh, OpenCode) in a side pane or from the command line: its intent, key decisions, what changed, open threads and where to resume.",
   "author": {
     "name": "BruceXcluding",
@@ -13,6 +13,12 @@
   "icon": "./.claude-plugin/icon.png",
   "types": "./types/index.d.ts",
   "userConfig": {
+    "model": {
+      "type": "string",
+      "title": "Recap model",
+      "description": "Model that writes recaps (e.g. sonnet, or a full model id). Empty: the session's own model. The pane's Model settings override it.",
+      "default": ""
+    },
     "partModel": {
       "type": "string",
       "title": "Model for condensing parts",

@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-11-05
+
+### Added
+- **Model selection.** In the pane, a **Model** button picks the recap model (the
+  session's own, `haiku`, `sonnet`, `opus`) and a separate model for long sessions'
+  parts; the choice is kept across sessions and each recap names its model. A
+  **Recap model** plugin setting takes any model id. On the command line,
+  `session-recap models` lists the provider's models, and `config set` / `config unset`
+  save `model`, `partModel`, `api`, `baseUrl` and `apiKey` (from stdin, file mode 600).
+- `session-recap list --all`.
+
+### Changed
+- **Each IDE shows its own sessions first.** The pane opens on Claude Code's sessions
+  and `list` on the calling agent's; **All agents** / `--all` shows every agent's.
+  The choice is remembered.
+- **Projects screen:** the project this session runs in is pinned on top; the rest are
+  grouped into Today / This week / Earlier; app-made scratch and temp folders are folded;
+  paths are shortened (`~`, middle cut); agents are colour-coded.
+
+### Fixed
+- The command still registers if the host cannot report the session's folder or model.
+
 ## [0.3.1] - 2026-11-05
 
 ### Fixed
@@ -81,6 +103,7 @@ All notable changes to this project are documented here. The format follows
 - Long sessions are condensed in parts in parallel, then merged into one recap.
 - Recaps are cached per session and rewritten only when the session changes.
 
+[0.4.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.4.0
 [0.3.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.3.1
 [0.3.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.3.0
 [0.2.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.2.0

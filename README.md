@@ -52,7 +52,7 @@ Recaps are written in the language you mostly write in that session.
 | dsh (deepseek-harness) | `~/.dsh/sessions/` (zstd) | the CLI, via `~/.agents/skills` |
 | OpenCode | `~/.local/share/opencode/opencode.db` | the CLI, via the installed skill |
 
-Every agent's sessions show up in the Claude Code pane and in `session-recap list`, grouped by project folder. Codex review threads and dsh subagent sessions are left out.
+Each IDE shows its **own** sessions first: the Claude Code pane opens on Claude Code's, and `session-recap list` inside Codex lists Codex's. One switch (**All agents** in the pane, `--all` on the command line) shows every agent's sessions side by side, grouped by project folder, which is how you see that a project went from Claude Code to Codex last week. The choice is remembered. Codex review threads and dsh subagent sessions are always left out.
 
 ## Install
 
@@ -100,6 +100,10 @@ Without these it uses `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` (with `ANTHRO
 | `/session-recap <project>` | Opens a project by folder name |
 | `/session-recap <title words>` | Finds a session by its title and recaps it |
 
+The **Projects** screen pins the project this session runs in on top, groups the rest into Today / This week / Earlier, and folds app-made scratch and temp folders away. **Claude Code sessions / All agents** sets the scope.
+
+**Choosing the model:** the **Model** button on the Projects and recap screens picks the model that writes recaps (the session's own, `haiku`, `sonnet` or `opus`) and, separately, a model for condensing long sessions' parts. Aliases resolve through the session's own provider settings, so `haiku` is whatever your setup maps it to. The choice is kept across sessions; each recap says which model wrote it. For a model id that is not an alias, set **Recap model** in the plugin's settings.
+
 In the session list each session shows its agent and the first line of its recap's intent; **All / Claude Code / Codex / dsh / OpenCode** filter the list. ● recap ready · ◐ the session continued since (press **Update recap**) · ○ no recap yet.
 
 ### On the command line
@@ -112,8 +116,12 @@ In the session list each session shows its agent and the first line of its recap
 | `session-recap projects` | Lists project folders with sessions per agent |
 | `session-recap --dry-run` | Shows how much would be sent to the model, and calls nothing |
 | `session-recap --refresh` | Writes the recap again from the start |
+| `session-recap models` | Lists the models your provider offers, marking the ones in use |
+| `session-recap config set model <id>` | Saves the recap model (`partModel` for long sessions' parts, also `api`, `baseUrl`) |
+| `echo "$KEY" \| session-recap config set apiKey -` | Saves the API key, read from stdin so it stays out of shell history (file mode 600) |
+| `session-recap config` | Shows the settings in use, the key masked |
 
-Add `--agent claude|codex|dsh|opencode` to pick an agent, `--json` for JSON.
+Add `--agent claude|codex|dsh|opencode` to pick an agent, `--all` for every agent, `--json` for JSON. `--model` / `--part-model` override the saved models for one run.
 
 ## Token use
 

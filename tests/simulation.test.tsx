@@ -86,6 +86,7 @@ function world(
     failStage?: 'part' | 'merge'
     store?: Record<string, unknown>
     pythonMissing?: boolean
+    projects?: unknown[]
   } = {},
 ): World {
   const w: World = {
@@ -113,6 +114,8 @@ function world(
     return { value: undefined }
   })
   on('session.id', () => ({ value: 'cur' }))
+  on('session.root', () => ({ value: '/code/app' }))
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }))
   on('session.model', () => ({ value: 'the-session-model' }))
   on('process.run', (_, e) => {
     const argv = [...e.argv]
@@ -121,7 +124,7 @@ function world(
     const [mode, a, , from] = argv.slice(3)
     const out =
       mode === 'projects'
-        ? [PROJECT]
+        ? (options.projects ?? [PROJECT])
         : mode === 'sessions'
           ? [SESSION, OTHER]
           : mode === 'context'
@@ -314,8 +317,13 @@ test('browse: pick a project, filter by agent, pick a Codex session, write its r
   await w.clock.settle()
 
   const ui = await $.ui.mount(PANE)
-  expect((await ui.find({ type: 'Text', text: /Claude Code 1 · Codex 1/ }))?.text).toContain('/code/app')
+  // This session's folder is the project pinned on top; other agents' sessions are named beside it.
+  expect(await ui.find({ type: 'Text', text: /^THIS PROJECT$/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /also Codex 1/ }))?.text).toContain('/code/app')
   await ui.press({ key: PROJECT.cwd })
+  // In this IDE's scope the list opens on its own sessions.
+  expect(await ui.find({ key: 'codex:old' })).toBeUndefined()
+  expect(await ui.find({ key: 'claude:cur' })).toBeDefined()
   await ui.press({ key: 'agent-codex' })
   expect(await ui.find({ key: 'claude:cur' })).toBeUndefined()
   await ui.press({ key: 'codex:old' })
@@ -377,3 +385,94 @@ test('/session-recap <unknown name> says nothing matched', async ($, on) => {
   expect(await ui.find({ key: PROJECT.cwd })).toBeDefined()
   await ui.unmount()
 })
+
+const MORE = [
+  PROJECT,
+  { cwd: '/home/me/code/api', sessions: 2, mtimeMs: Date.now() - 2 * 86_400_000, agents: { claude: 2 } },
+  { cwd: '/home/me/code/codex-only', sessions: 4, mtimeMs: Date.now(), agents: { codex: 4 } },
+  {
+    cwd: '/home/me/Library/Application Support/Claude/scratch-workspaces/a/b/scratch-1',
+    sessions: 1,
+    mtimeMs: Date.now(),
+    agents: { claude: 1 },
+  },
+]
+
+test('Projects: this IDE by default, grouped by time, temporary folders folded, all agents on request', async ($, on) => {
+  const w = world(on, { projects: MORE })
+  await startSession($)
+  await typeCommand($, 'browse')
+  await w.clock.settle()
+
+  const ui = await $.ui.mount(PANE)
+  expect(await ui.find({ key: '/home/me/code/api' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^THIS WEEK$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /~\/code\/api/ })).toBeDefined()
+  // A project with no Claude Code session waits behind the scope switch.
+  expect(await ui.find({ key: '/home/me/code/codex-only' })).toBeUndefined()
+  expect((await ui.find({ key: 'show-all' }))?.text).toContain('1 more project')
+  // Scratch folders are folded until asked for.
+  expect(await ui.find({ key: 'temp' })).toMatchObject({ text: '▸ Temporary folders (1)' })
+  expect(await ui.find({ key: MORE[3]!.cwd })).toBeUndefined()
+  await ui.press({ key: 'temp' })
+  expect(await ui.find({ key: MORE[3]!.cwd })).toBeDefined()
+
+  await ui.press({ key: 'scope-all' })
+  expect(await ui.find({ key: '/home/me/code/codex-only' })).toBeDefined()
+  expect(await ui.find({ key: 'show-all' })).toBeUndefined()
+  // The choice is kept for the next session.
+  expect(w.store.get('prefs')).toMatchObject({ scope: 'all' })
+  await ui.unmount()
+})
+
+test('the scope chosen in an earlier session is the one a new session opens with', async ($, on) => {
+  const w = world(on, { projects: MORE, store: { prefs: { model: '', partModel: '', scope: 'all' } } })
+  await startSession($)
+  await typeCommand($, 'browse')
+  await w.clock.settle()
+
+  const ui = await $.ui.mount(PANE)
+  expect(await ui.find({ key: '/home/me/code/codex-only' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a model picked in the pane writes the recap, is kept, and is named on the recap', async ($, on) => {
+  const w = world(on, { turns: 200 })
+  await startSession($)
+  await typeCommand($, 'browse')
+  await w.clock.settle()
+
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'settings' })
+  expect((await ui.find({ key: 'model-session' }))?.text).toBe('Session model · the-session-model')
+  await ui.press({ key: 'model-sonnet' })
+  await ui.press({ key: 'part-haiku' })
+  expect(await ui.find({ key: 'settings' })).toMatchObject({ text: 'Model: sonnet' })
+  expect(w.store.get('prefs')).toMatchObject({ model: 'sonnet', partModel: 'haiku' })
+
+  await ui.press({ key: PROJECT.cwd })
+  await ui.press({ key: 'claude:cur' })
+  await ui.press({ key: 'summarize' })
+  expect(new Set(w.models.filter(m => m.stage === 'part').map(m => m.model))).toEqual(new Set(['haiku']))
+  expect(w.models.at(-1)?.model).toBe('sonnet')
+  expect(w.store.get('recap:claude:cur')).toMatchObject({ model: 'sonnet' })
+  expect(await ui.find({ type: 'Text', text: /by sonnet/ })).toBeDefined()
+
+  // Back to the session's own model.
+  await ui.press({ key: 'model-session' })
+  expect(w.store.get('prefs')).toMatchObject({ model: '' })
+  await ui.unmount()
+})
+
+test(
+  'a recap model set in the plugin settings is the default choice',
+  { options: { model: 'opus' } },
+  async ($, on) => {
+    const w = world(on)
+    await startSession($)
+    await typeCommand($)
+    await w.clock.settle()
+
+    expect(w.models.at(-1)?.model).toBe('opus')
+  },
+)

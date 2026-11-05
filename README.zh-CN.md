@@ -52,7 +52,7 @@
 | dsh（deepseek-harness） | `~/.dsh/sessions/`（zstd 压缩） | 命令行，通过 `~/.agents/skills` |
 | OpenCode | `~/.local/share/opencode/opencode.db` | 命令行，通过安装的 skill |
 
-所有 agent 的会话都会出现在 Claude Code 面板和 `session-recap list` 中，按项目文件夹分组。Codex 的自动评审线程和 dsh 的子 agent 会话不会列出。
+每个 IDE 先显示**自己的**会话：Claude Code 面板打开时只列 Claude Code 的会话，在 Codex 里运行 `session-recap list` 只列 Codex 的。一个开关（面板中的 **All agents**，命令行的 `--all`）可以把所有 agent 的会话按项目文件夹并排显示，这样就能看到一个项目上周从 Claude Code 转到了 Codex。选择会被记住。Codex 的自动评审线程和 dsh 的子 agent 会话始终不列出。
 
 ## 安装
 
@@ -100,6 +100,10 @@ export SESSION_RECAP_PART_MODEL=deepseek-chat    # 可选：长会话分段压�
 | `/session-recap <项目名>` | 按文件夹名打开项目 |
 | `/session-recap <标题关键词>` | 按标题找到会话并生成回顾 |
 
+**Projects** 页面把当前会话所在的项目固定在最上方，其余按"今天 / 本周 / 更早"分组，应用临时创建的 scratch 和 tmp 文件夹会折叠起来。**Claude Code sessions / All agents** 切换显示范围。
+
+**选择模型：**Projects 页和回顾页上的 **Model** 按钮可以选择写回顾的模型（会话自身的模型、`haiku`、`sonnet` 或 `opus`），并可单独选择压缩长会话分段的模型。别名按会话自身的服务设置解析，所以 `haiku` 就是你的配置把它映射到的模型。选择会跨会话保留，每份回顾都会标明由哪个模型写成。不是别名的模型 id，可在插件设置的 **Recap model** 中填写。
+
 会话列表中每个会话都标出所属 agent 和回顾意图的首行；**All / Claude Code / Codex / dsh / OpenCode** 可筛选列表。● 回顾已就绪 · ◐ 回顾后会话又有进展（点 **Update recap**）· ○ 还没有回顾。
 
 ### 在命令行中
@@ -112,8 +116,12 @@ export SESSION_RECAP_PART_MODEL=deepseek-chat    # 可选：长会话分段压�
 | `session-recap projects` | 列出项目文件夹及各 agent 的会话数 |
 | `session-recap --dry-run` | 显示将发送给模型的内容大小，不调用模型 |
 | `session-recap --refresh` | 从头重新生成回顾 |
+| `session-recap models` | 列出服务提供的模型，并标出正在使用的 |
+| `session-recap config set model <id>` | 保存写回顾的模型（`partModel` 为长会话分段模型，也可设 `api`、`baseUrl`） |
+| `echo "$KEY" \| session-recap config set apiKey -` | 从 stdin 读取并保存 API key，不进 shell 历史（文件权限 600） |
+| `session-recap config` | 显示当前生效的设置，key 打码 |
 
-加 `--agent claude|codex|dsh|opencode` 指定 agent，加 `--json` 输出 JSON。
+加 `--agent claude|codex|dsh|opencode` 指定 agent，加 `--all` 显示所有 agent，加 `--json` 输出 JSON。`--model` / `--part-model` 只对本次运行覆盖保存的模型。
 
 ## Token 用量
 

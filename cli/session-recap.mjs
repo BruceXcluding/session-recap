@@ -4,7 +4,7 @@
 // and calls the model the person configured (Anthropic or OpenAI-compatible).
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -77,7 +77,9 @@ const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).ver
 const AGENTS = ['claude', 'codex', 'dsh', 'opencode']
 /** @type {Record<string, string>} */
 const LABEL = { claude: 'Claude Code', codex: 'Codex', dsh: 'dsh', opencode: 'OpenCode' }
-const COMMANDS = ['list', 'projects', 'install', 'config', 'recap']
+const COMMANDS = ['list', 'projects', 'install', 'config', 'models', 'recap']
+// Settings `config set` writes; the key is read from stdin, never the command line.
+const SETTABLE = ['model', 'partModel', 'api', 'baseUrl', 'apiKey']
 const PARALLEL = 4
 const RETRIES = 2
 
@@ -96,9 +98,15 @@ Usage
   session-recap projects         list project folders and their sessions per agent
   session-recap install          add the session-recap skill to Codex, OpenCode and ~/.agents
   session-recap config           show the model settings in use
+  session-recap config set <key> <value>
+                                 save a setting: model, partModel, api, baseUrl, or
+                                 apiKey (read from stdin: echo $KEY | session-recap config set apiKey -)
+  session-recap config unset <key>
+  session-recap models           list the models your provider offers; marks the ones in use
 
 Options
   --agent <name>    claude, codex, dsh, opencode, or auto (the agent running this; the default)
+  --all             every agent's sessions (list); the same as --agent any
   --refresh         write the recap again from the start instead of updating it
   --dry-run         show what would be sent to the model, and its size, without calling it
   --json            print JSON instead of Markdown
@@ -125,6 +133,7 @@ function parseArgs(argv) {
     if (a === '--agent') opts.agent = value()
     else if (a === '--model') opts.model = value()
     else if (a === '--part-model') opts.partModel = value()
+    else if (a === '--all') opts.agent = 'any'
     else if (a === '--refresh') opts.refresh = true
     else if (a === '--dry-run') opts.dryRun = true
     else if (a === '--json') opts.json = true
@@ -544,7 +553,8 @@ function printDryRun(opts, session, digest, from) {
 
 /** @param {Options} opts */
 function list(opts) {
-  const agent = opts.agent && opts.agent !== 'auto' ? opts.agent : 'any'
+  // Inside an agent, its own sessions; from a plain shell, or with --all, every agent's.
+  const agent = opts.agent === undefined || opts.agent === 'auto' ? detectAgent() : opts.agent
   const query = opts.words.join(' ')
   /** @type {Session[]} */
   const rows = python(query ? ['find', query] : ['all']).filter(
@@ -639,6 +649,86 @@ function install(opts) {
   )
 }
 
+/** @returns {Record<string, string>} */
+function readConfigFile() {
+  try {
+    return JSON.parse(readFileSync(configPath(), 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
+/** @param {Record<string, string>} values */
+function writeConfigFile(values) {
+  mkdirSync(dirname(configPath()), { recursive: true })
+  writeFileSync(configPath(), `${JSON.stringify(values, null, 2)}\n`, { mode: 0o600 })
+  // An existing file keeps its mode on write: the key must not be readable by others.
+  chmodSync(configPath(), 0o600)
+}
+
+/**
+ * `config set <key> <value>`, `config unset <key>`, or (no words) the settings in use.
+ * @param {Options} opts
+ */
+function config(opts) {
+  const [action, key, value] = opts.words
+  if (action === undefined) return showConfig(opts)
+  if (action !== 'set' && action !== 'unset')
+    fail(`config ${action}: use "config set <key> <value>" or "config unset <key>"`)
+  if (key === undefined || !SETTABLE.includes(key)) fail(`config ${action} takes one of: ${SETTABLE.join(', ')}`)
+  const values = readConfigFile()
+  if (action === 'unset') {
+    delete values[key]
+  } else {
+    if (key === 'apiKey' && value !== '-')
+      fail('read the key from stdin, so it stays out of shell history: echo "$KEY" | session-recap config set apiKey -')
+    const given = value === '-' ? readFileSync(0, 'utf8').trim() : value
+    if (given === undefined || given === '') fail(`config set ${key} needs a value`)
+    if (key === 'api' && given !== 'anthropic' && given !== 'openai') fail('api is "anthropic" or "openai"')
+    values[key] = given
+  }
+  writeConfigFile(values)
+  process.stdout.write(`${action === 'set' ? 'saved' : 'removed'} ${key} in ${configPath()}\n`)
+}
+
+/**
+ * The models the configured provider lists (GET /models), the ones in use marked.
+ * @param {Options} opts
+ * @param {(url: string, init: { headers: Record<string, string> }) => Promise<{ ok: boolean, status: number, text: () => Promise<string> }>} [fetchImpl]
+ */
+export async function models(opts, fetchImpl = /** @type {any} */ (fetch)) {
+  const c = modelConfig(opts)
+  if (!c.apiKey || !c.baseUrl) fail('no model provider configured; see: session-recap --help', 2)
+  const base = c.baseUrl.replace(/\/+$/, '')
+  const isAnthropic = c.api === 'anthropic'
+  const res = await fetchImpl(isAnthropic ? `${base}/v1/models?limit=100` : `${base}/models`, {
+    headers: isAnthropic
+      ? {
+          'anthropic-version': '2023-06-01',
+          ...(c.bearer ? { authorization: `Bearer ${c.apiKey}` } : { 'x-api-key': c.apiKey }),
+        }
+      : { authorization: `Bearer ${c.apiKey}` },
+  })
+  const body = await res.text()
+  if (!res.ok) fail(`${base} answered HTTP ${res.status} when asked for its models: ${body.slice(0, 200)}`)
+  /** @type {{ id: string }[]} */
+  const listed = JSON.parse(body).data ?? []
+  const ids = listed.map(m => m.id).sort()
+  if (opts.json)
+    return process.stdout.write(`${JSON.stringify({ models: ids, model: c.model, partModel: c.partModel })}\n`)
+  for (const id of ids) {
+    const marks = [id === c.model ? 'recap' : '', id === c.partModel ? 'parts' : ''].filter(Boolean)
+    process.stdout.write(`${marks.length > 0 ? '●' : ' '} ${id}${marks.length > 0 ? `   ← ${marks.join(', ')}` : ''}\n`)
+  }
+  for (const [name, id] of [
+    ['recap', c.model],
+    ['parts', c.partModel],
+  ]) {
+    if (id && !ids.includes(id)) process.stdout.write(`! ${name} model "${id}" is not in this list\n`)
+  }
+  process.stdout.write('\nPick one: session-recap config set model <id>   (parts: config set partModel <id>)\n')
+}
+
 /** @param {Options} opts */
 function showConfig(opts) {
   const c = modelConfig(opts)
@@ -663,7 +753,8 @@ export async function main(argv) {
   if (opts.command === 'list') return list(opts)
   if (opts.command === 'projects') return projects(opts)
   if (opts.command === 'install') return install(opts)
-  if (opts.command === 'config') return showConfig(opts)
+  if (opts.command === 'config') return config(opts)
+  if (opts.command === 'models') return models(opts)
   return recap(opts)
 }
 

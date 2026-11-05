@@ -3,7 +3,17 @@
 // Run: node --test tests/cli.test.mjs
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -162,6 +172,11 @@ describe('a whole run against a fake model server', () => {
     )
     writeFileSync(join(folder, 's1.jsonl'), `${lines.join('\n')}\n`)
     server = createServer((req, res) => {
+      if (req.method === 'GET' && req.url === '/models') {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ data: [{ id: 'small' }, { id: 'fake' }] }))
+        return
+      }
       let body = ''
       req.on('data', c => (body += c))
       req.on('end', () => {
@@ -185,17 +200,21 @@ describe('a whole run against a fake model server', () => {
   })
 
   const run = (...args) =>
-    new Promise((done, reject) => {
-      const env = {
-        PATH: process.env.PATH,
-        HOME: home,
-        XDG_CACHE_HOME: join(home, '.cache'),
+    runWith(
+      {
         XDG_CONFIG_HOME: join(home, '.config'),
         SESSION_RECAP_BASE_URL: url,
         SESSION_RECAP_API_KEY: 'test',
         SESSION_RECAP_MODEL: 'fake',
-      }
+      },
+      args,
+    )
+
+  const runWith = (extra, args, stdin) =>
+    new Promise((done, reject) => {
+      const env = { PATH: process.env.PATH, HOME: home, XDG_CACHE_HOME: join(home, '.cache'), ...extra }
       const child = spawn(process.execPath, [CLI, ...args], { cwd: project, env })
+      if (stdin !== undefined) child.stdin.end(stdin)
       let out = ''
       let err = ''
       child.stdout.on('data', c => (out += c))
@@ -258,6 +277,56 @@ describe('a whole run against a fake model server', () => {
     assert.match(install.out, /installed .*\.agents\/skills\/session-recap\/SKILL\.md/)
     assert.match(install.out, /skip opencode/)
     assert.deepEqual(readdirSync(join(home, '.codex', 'skills', 'session-recap')), ['SKILL.md'])
+  })
+
+  test('models lists what the provider offers and marks the ones in use', async () => {
+    const r = await runWith(
+      {
+        XDG_CONFIG_HOME: join(home, '.config'),
+        SESSION_RECAP_BASE_URL: url,
+        SESSION_RECAP_API_KEY: 'test',
+        SESSION_RECAP_MODEL: 'fake',
+        SESSION_RECAP_PART_MODEL: 'gone',
+      },
+      ['models'],
+    )
+    assert.equal(r.code, 0, r.err)
+    assert.match(r.out, /^● fake {3}← recap\n {2}small\n/)
+    assert.match(r.out, /! parts model "gone" is not in this list/)
+  })
+
+  test('config set and unset save choices; the key comes from stdin only', async () => {
+    const own = { XDG_CONFIG_HOME: join(home, 'own-config') }
+    const file = join(home, 'own-config', 'session-recap', 'config.json')
+    assert.equal((await runWith(own, ['config', 'set', 'baseUrl', url])).code, 0)
+    assert.equal((await runWith(own, ['config', 'set', 'model', 'fake'])).code, 0)
+    const refused = await runWith(own, ['config', 'set', 'apiKey', 'sk-in-history'])
+    assert.equal(refused.code, 1)
+    assert.match(refused.err, /from stdin/)
+    assert.equal((await runWith(own, ['config', 'set', 'apiKey', '-'], 'sk-from-stdin\n')).code, 0)
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { baseUrl: url, model: 'fake', apiKey: 'sk-from-stdin' })
+    assert.equal(statSync(file).mode & 0o777, 0o600)
+
+    const shown = await runWith(own, ['config'])
+    assert.match(shown.out, /model: +fake/)
+    assert.match(shown.out, /API key: +sk-f…tdin \(13 chars\)/)
+    assert.doesNotMatch(shown.out, /sk-from-stdin/)
+
+    // The saved settings are enough to write a recap.
+    const recap = await runWith(own, ['--refresh'])
+    assert.equal(recap.code, 0, recap.err)
+    assert.match(recap.out, /## Intent/)
+
+    assert.equal((await runWith(own, ['config', 'unset', 'model'])).code, 0)
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(file, 'utf8'))), ['baseUrl', 'apiKey'])
+    assert.equal((await runWith(own, ['config', 'set', 'color', 'red'])).code, 1)
+  })
+
+  test('list shows the sessions of the agent it runs in; --all shows every agent', async () => {
+    const codex = await runWith({ XDG_CONFIG_HOME: join(home, '.config'), CODEX_THREAD_ID: 't' }, ['list'])
+    assert.doesNotMatch(codex.out, /Step 1 of the app/)
+    const all = await runWith({ XDG_CONFIG_HOME: join(home, '.config'), CODEX_THREAD_ID: 't' }, ['list', '--all'])
+    assert.match(all.out, /Claude Code .* Step 1 of the app/)
   })
 
   test('no model configured is a clear error', async () => {

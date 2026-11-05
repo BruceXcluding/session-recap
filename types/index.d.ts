@@ -26,6 +26,8 @@ export type Recap = {
   mtimeMs: number
   at: number
   markdown: string
+  // The model that wrote it.
+  model?: string
   // How many prompts the recap covers: a refresh recaps only the ones after.
   prompts?: number
 }
@@ -42,6 +44,22 @@ export type View = {
   // Which part of the recap is shown below the intent and resume cards.
   section?: 'all' | 'ideas' | 'changed' | 'open'
   error?: string
+  // The person's choices, kept in the plugin's store across sessions.
+  prefs?: Prefs
+  // Where this session runs and with which model, for the Projects screen.
+  here?: { cwd: string; home: string; model: string }
+  // Whether the settings card and the temporary folders are open.
+  isSettingsOpen?: boolean
+  isTempOpen?: boolean
+}
+
+export type Prefs = {
+  // The recap's model; '' is the session's own.
+  model: string
+  // The model condensing parts of long sessions; '' is the recap's model.
+  partModel: string
+  // 'agent': this IDE's sessions only; 'all': every agent's.
+  scope: 'agent' | 'all'
 }
 
 export type Job = { step: string; done: number; total: number }

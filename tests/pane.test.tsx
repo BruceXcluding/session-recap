@@ -29,7 +29,7 @@ const PROJECT = { cwd: '/home/me/code/web-shop', sessions: 3, mtimeMs: 1000, age
 function seed(value: unknown) {
   return (_: unknown, e: { key: string }) =>
     e.key === 'view'
-      ? { value: { value: { shape: 'view-3', value }, version: 1 } }
+      ? { value: { value: { shape: 'view-4', value }, version: 1 } }
       : {
           value: {
             value: { shape: 'jobs-3', value: { 'claude:s1': { step: 'Condensed 2 of 7 parts', done: 2, total: 8 } } },
