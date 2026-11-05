@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { writeRecap } from '../core/recap.mjs'
 import type { Digest } from '../core/recap.mjs'
-import type { Job, Prefs, ProjectRow, Recap, SessionRow, View } from '../types'
+import type { Job, Prefs, ProjectRow, Recap, SessionRow, Tick, View } from '../types'
 
 const PANE = 'session-recap'
 const TITLE = 'Session recap'
@@ -47,9 +47,18 @@ const jobs = atom(
   { plugin: 'session-recap', key: 'jobs' } as const,
   {},
   {
-    shape: 'jobs-3',
+    shape: 'jobs-4',
   },
 )
+
+const tick = atom({ plugin: 'session-recap', key: 'tick' } as const, { frame: 0, now: 0 } as Tick, {
+  shape: 'tick-1',
+})
+// Frames per second of the progress animation, while a recap is being written.
+const FRAME_MS = 200
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+// The one timer that advances `tick`; a reload drops it with the module.
+let ticker: Timer | undefined
 
 type SectionKey = 'intent' | 'ideas' | 'changed' | 'open' | 'resume'
 // The recap's headings, in the order RECAP_FORMAT asks for them; a model
@@ -195,13 +204,33 @@ async function showRecap($: EngineInterface, session: SessionRow): Promise<void>
 }
 
 async function setJob($: EngineInterface, key: string, job: Job | undefined): Promise<void> {
-  await update($, jobs, all => {
+  const now = await $.clock.now()
+  const all = await update($, jobs, all => {
     const next = { ...all }
     if (job === undefined) delete next[key]
-    else next[key] = job
+    else next[key] = { ...job, startedAt: all[key]?.startedAt ?? now }
 
     return next
   })
+  // Animate while anything runs; stop the timer when the last job ends.
+  if (Object.keys(all).length > 0 && ticker === undefined) {
+    await update($, tick, t => ({ ...t, now }))
+    ticker = $.clock.every(FRAME_MS, () => {
+      void (async () => {
+        const at = await $.clock.now()
+        await update($, tick, t => ({ frame: t.frame + 1, now: at }))
+      })()
+    })
+  } else if (Object.keys(all).length === 0 && ticker !== undefined) {
+    ticker.cancel()
+    ticker = undefined
+  }
+}
+
+function elapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`
 }
 
 type Note = { note: string; at: number }
@@ -439,12 +468,27 @@ export const register: Register = (on, options) => {
     const running = await read($, jobs)
     const width = e.props.bodyColumns
 
-    const progress = (job: Job) => {
-      const cells = 12
-      const filled = job.total > 0 ? Math.round((job.done / job.total) * cells) : 0
-      const bar = job.total > 0 ? `${'▰'.repeat(filled)}${'▱'.repeat(cells - filled)}  ` : ''
+    // Only a drawing that shows a running job reads the tick, so only those redraw with it.
+    const frame = Object.keys(running).length > 0 ? await read($, tick) : { frame: 0, now: 0 }
 
-      return `${bar}${job.step}…`
+    // A spinner, the bar filled to the steps done with a light sweeping the rest
+    // (so a long step still moves), the step, and the time so far.
+    const progress = (job: Job, cells = 12) => {
+      const filled = job.total > 0 ? Math.min(cells, Math.round((job.done / job.total) * cells)) : 0
+      const empty = cells - filled
+      const sweep = empty > 0 ? frame.frame % (empty + 3) : -1
+      const rest = Array.from({ length: empty }, (_, i) => (i === sweep || i === sweep - 1 ? '▰' : '▱')).join('')
+      const time = job.startedAt !== undefined && frame.now > 0 ? ` · ${elapsed(frame.now - job.startedAt)}` : ''
+
+      return (
+        <Text>
+          <Text color="warning">{SPINNER[frame.frame % SPINNER.length]} </Text>
+          {job.total > 0 && <Text color="warning">{'▰'.repeat(filled)}</Text>}
+          {job.total > 0 && <Text dimColor>{rest} </Text>}
+          <Text> {job.step}…</Text>
+          <Text dimColor>{time}</Text>
+        </Text>
+      )
     }
 
     const errorCard = (onRetry?: () => void) =>
@@ -689,10 +733,7 @@ export const register: Register = (on, options) => {
                     </Text>
                   </Button>
                   {job !== undefined ? (
-                    <Text color="warning" size="footnote">
-                      {' '}
-                      {progress(job)}
-                    </Text>
+                    <Text size="footnote"> {progress(job, 8)}</Text>
                   ) : s.intent !== undefined ? (
                     <Text dimColor size="footnote">
                       {' '}
@@ -770,7 +811,7 @@ export const register: Register = (on, options) => {
             <Text color="warning" weight="semibold">
               Writing the recap
             </Text>
-            <Text>{progress(job)}</Text>
+            {progress(job)}
           </Box>
         )}
         {errorCard(job === undefined ? write : undefined)}

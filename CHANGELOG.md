@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-11-05
+
+### Changed
+- The progress of a recap being written is animated: a spinner, a light sweeping the
+  bar's unfilled part (so a long step visibly runs), and the time so far. The animation
+  runs only while a recap is being written.
+
 ## [0.4.0] - 2026-11-05
 
 ### Added
@@ -103,6 +110,7 @@ All notable changes to this project are documented here. The format follows
 - Long sessions are condensed in parts in parallel, then merged into one recap.
 - Recaps are cached per session and rewritten only when the session changes.
 
+[0.4.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.4.1
 [0.4.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.4.0
 [0.3.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.3.1
 [0.3.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.3.0

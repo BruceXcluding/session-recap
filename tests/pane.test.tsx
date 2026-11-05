@@ -26,16 +26,22 @@ const SESSION = {
 }
 const PROJECT = { cwd: '/home/me/code/web-shop', sessions: 3, mtimeMs: 1000, agents: { claude: 2, codex: 1 } }
 
+// A recap 65 s in, at frame 3 of the animation.
+const JOBS = { 'claude:s1': { step: 'Condensed 2 of 7 parts', done: 2, total: 8, startedAt: 10_000 } }
+const TICK = { frame: 3, now: 75_000 }
+
 function seed(value: unknown) {
-  return (_: unknown, e: { key: string }) =>
-    e.key === 'view'
-      ? { value: { value: { shape: 'view-4', value }, version: 1 } }
-      : {
-          value: {
-            value: { shape: 'jobs-3', value: { 'claude:s1': { step: 'Condensed 2 of 7 parts', done: 2, total: 8 } } },
-            version: 1,
-          },
-        }
+  return (_: unknown, e: { key: string }) => ({
+    value: {
+      value:
+        e.key === 'view'
+          ? { shape: 'view-4', value }
+          : e.key === 'tick'
+            ? { shape: 'tick-1', value: TICK }
+            : { shape: 'jobs-4', value: JOBS },
+      version: 1,
+    },
+  })
 }
 
 test('the recap screen draws the recap and the progress, on every surface', async ($, on) => {
@@ -61,7 +67,8 @@ test('the recap screen draws the recap and the progress, on every surface', asyn
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ type: 'Text', text: /结账页面/ }))?.text).toBe('结账页面重构')
     expect((await ui.find({ type: 'Text', text: /Condensed 2 of 7/ }))?.text).toBe(
-      '▰▰▰▱▱▱▱▱▱▱▱▱  Condensed 2 of 7 parts…',
+      // Frame 3: the spinner's 4th glyph, 3 of 12 cells done, the sweep at cells 6–7, 65 s so far.
+      '⠸ ▰▰▰▱▱▰▰▱▱▱▱▱  Condensed 2 of 7 parts… · 1m 05s',
     )
     expect(await ui.find({ type: 'Text', text: /^INTENT$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^WHERE TO RESUME$/ })).toBeDefined()

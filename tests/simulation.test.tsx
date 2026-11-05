@@ -87,6 +87,7 @@ function world(
     store?: Record<string, unknown>
     pythonMissing?: boolean
     projects?: unknown[]
+    modelDelayMs?: number
   } = {},
 ): World {
   const w: World = {
@@ -140,7 +141,9 @@ function world(
       },
     }
   })
-  on('model.complete', (_, e) => {
+  on('model.complete', async (_, e) => {
+    // A slow model answers on the test's clock, so a test can watch the work run.
+    if (options.modelDelayMs !== undefined) await w.clock.sleep(options.modelDelayMs)
     // Parts are condensed under one system prompt, the recap merged under another.
     const stage = e.system?.startsWith('You condense') ? 'part' : 'merge'
     w.models.push({ model: e.model, stage, prompt: e.prompt })
@@ -476,3 +479,27 @@ test(
     expect(w.models.at(-1)?.model).toBe('opus')
   },
 )
+
+test('the progress animates while a recap is written, and stops when it is done', async ($, on) => {
+  const w = world(on, { modelDelayMs: 3000 })
+  await startSession($)
+  await typeCommand($)
+  await w.clock.settle()
+
+  const ui = await $.ui.mount(PANE)
+  const line = async () => (await ui.find({ type: 'Text', text: /Writing the recap with/ }))?.text
+  const first = await line()
+  expect(first).toMatch(/^⠋ /)
+  await w.clock.advance(400)
+  const second = await line()
+  // Two frames later: another spinner glyph, and the clock has moved.
+  expect(second).toMatch(/^⠹ /)
+  expect(second).not.toBe(first)
+  await w.clock.advance(1600)
+  expect(await line()).toMatch(/· 2s$/)
+
+  await w.clock.advance(1500)
+  expect(await ui.find({ type: 'Text', text: /^Writing the recap$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Markdown', text: /Build the app\./ })).toBeDefined()
+  await ui.unmount()
+})

@@ -62,7 +62,16 @@ export type Prefs = {
   scope: 'agent' | 'all'
 }
 
-export type Job = { step: string; done: number; total: number }
+export type Job = {
+  step: string
+  done: number
+  total: number
+  // When the recap was started, by $.clock.now(), for the elapsed time.
+  startedAt?: number
+}
+
+// The frame counter that animates progress while any recap is being written.
+export type Tick = { frame: number; now: number }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -70,6 +79,7 @@ declare module 'claude-code' {
       view: Shaped<View>
       // Progress per session key (agent:id) while a recap is being written.
       jobs: Shaped<Record<string, Job>>
+      tick: Shaped<Tick>
     }
   }
 }
