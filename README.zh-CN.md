@@ -46,7 +46,7 @@
 ## 快速开始
 
 ```bash
-npm install -g github:BruceXcluding/session-recap
+npm install -g github:BruceXcluding/session-recap --allow-git=all
 session-recap mcp-config            # 输出你所用客户端的 MCP 配置
 session-recap serve                 # 打开本地查看器
 ```
@@ -54,6 +54,8 @@ session-recap serve                 # 打开本地查看器
 然后对你的 agent 说：*"回顾一下这个会话"*、*"我在这个项目上一个会话是做什么的？"*、*"Recap this session"*。
 
 **不需要 API key。**通过 MCP 使用时，由正在和你对话的 agent 用它自己的模型写回顾；session-recap 只负责读取和压缩记录。session-recap 自己的模型是可选的（用于命令行和查看器里的 **Write recap** 按钮）。
+
+`--allow-git=all` 让 npm 12 可以从 GitHub 安装（npm 12 默认禁止，见 [npm v12](https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/)），旧版 npm 也接受这个参数。session-recap 不运行任何安装脚本。
 
 **环境要求：**Node.js 20+、`python3`（macOS 自带），读取 dsh 会话需要 `zstd` 命令或 Python 3.14+。
 

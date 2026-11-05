@@ -46,7 +46,7 @@ Every recap also has a **Map**: the phases the work went through (pivots marked)
 ## Quick start
 
 ```bash
-npm install -g github:BruceXcluding/session-recap
+npm install -g github:BruceXcluding/session-recap --allow-git=all
 session-recap mcp-config            # prints the MCP entry for your client
 session-recap serve                 # opens the local viewer
 ```
@@ -54,6 +54,8 @@ session-recap serve                 # opens the local viewer
 Then, in your agent: *"Recap this session"*, *"What was my last session in this project about?"*, *"总结一下这个会话"*.
 
 **No API key needed.** Through MCP, the agent you are talking to writes the recap with its own model; session-recap only reads and condenses the transcript. A model of session-recap's own is optional (for the CLI and the viewer's **Write recap** button).
+
+`--allow-git=all` lets npm 12 install from GitHub, which it blocks by default ([npm v12](https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/)); older npm accepts it too. session-recap runs no install scripts.
 
 **Requirements:** Node.js 20+, `python3` (macOS ships one), and for dsh sessions the `zstd` command or Python 3.14+.
 
