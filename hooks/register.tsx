@@ -203,8 +203,18 @@ async function showRecap($: EngineInterface, session: SessionRow): Promise<void>
   }))
 }
 
+// The time by the host's clock, for the animation only: a host that cannot
+// say gives the wall clock, so it never stands in the way of a recap.
+async function clockNow($: EngineInterface): Promise<number> {
+  try {
+    return await $.clock.now()
+  } catch {
+    return Date.now()
+  }
+}
+
 async function setJob($: EngineInterface, key: string, job: Job | undefined): Promise<void> {
-  const now = await $.clock.now()
+  const now = await clockNow($)
   const all = await update($, jobs, all => {
     const next = { ...all }
     if (job === undefined) delete next[key]
@@ -212,17 +222,30 @@ async function setJob($: EngineInterface, key: string, job: Job | undefined): Pr
 
     return next
   })
-  // Animate while anything runs; stop the timer when the last job ends.
-  if (Object.keys(all).length > 0 && ticker === undefined) {
-    await update($, tick, t => ({ ...t, now }))
-    ticker = $.clock.every(FRAME_MS, () => {
-      void (async () => {
-        const at = await $.clock.now()
-        await update($, tick, t => ({ frame: t.frame + 1, now: at }))
-      })()
-    })
-  } else if (Object.keys(all).length === 0 && ticker !== undefined) {
-    ticker.cancel()
+  await animate($, Object.keys(all).length > 0, now)
+}
+
+// Runs the tick while any job runs and stops it after the last one. A tick
+// that fails (its host gone: a reload, a test's end) stops its own timer.
+async function animate($: EngineInterface, isRunning: boolean, now: number): Promise<void> {
+  try {
+    if (isRunning && ticker === undefined) {
+      await update($, tick, t => ({ ...t, now }))
+      const own = $.clock.every(FRAME_MS, () => {
+        void (async () => {
+          const at = await clockNow($)
+          await update($, tick, t => ({ frame: t.frame + 1, now: at }))
+        })().catch(() => {
+          own.cancel()
+          if (ticker === own) ticker = undefined
+        })
+      })
+      ticker = own
+    } else if (!isRunning && ticker !== undefined) {
+      ticker.cancel()
+      ticker = undefined
+    }
+  } catch {
     ticker = undefined
   }
 }
@@ -294,7 +317,19 @@ async function buildMap($: EngineInterface, session: SessionRow): Promise<void> 
   try {
     const { model } = await chosenModel($)
     await setJob($, key, { step: `Building the map with ${model}`, done: 0, total: 0 })
-    const markdown = await addMap({ raw: recap.markdown, complete: completer($, model, '') })
+    // What the recap does not say: when the session ran, so dates are not guessed past it.
+    const digest: Digest = {
+      agent: session.agent,
+      title: session.title,
+      cwd: session.cwd,
+      lastTs: new Date(session.mtimeMs).toISOString(),
+      prompts: recap.prompts ?? 0,
+      from: 0,
+      files: [],
+      fileCount: 0,
+      text: '',
+    }
+    const markdown = await addMap({ raw: recap.markdown, digest, complete: completer($, model, '') })
     const next: Recap = { ...recap, markdown, at: recap.at }
     await $.store.set(`recap:${key}`, next)
     await update($, view, v => (v.session && keyOf(v.session) === key ? { ...v, recap: next, error: undefined } : v))
@@ -434,6 +469,8 @@ export const register: Register = (on, options) => {
   }
 
   on('session.start', async ($, e, next) => {
+    // A timer of an earlier session's host is not this one's.
+    ticker = undefined
     // The person's choices and where this session runs. A host that cannot
     // say leaves them at their defaults; the command registers either way.
     try {
@@ -519,97 +556,145 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // The recap as a journey: phases down a line to where it stands, then the
-    // decisions with what was turned down, then counts that open their lists.
-    const mapView = (map: RecapMap, resume: string | undefined) => {
-      const lists = { shipped: map.shipped, open: map.open, rejected: map.rejected }
-      const label = { shipped: 'Shipped', open: 'Open', rejected: 'Rejected' } as const
+    // The recap as a journey: phases down a rail to where it stands, then the
+    // decisions (the open ones first) with what was turned down, then the lists.
+    const mapView = (map: RecapMap, resume: string | undefined, lastMs: number) => {
+      const lists = { open: map.open, shipped: map.shipped, rejected: map.rejected }
+      const label = { open: 'Open', shipped: 'Shipped', rejected: 'Rejected' } as const
+      const shown = v.mapList ?? 'open'
       const statusMark = { done: '✓', open: '◷', paused: '⏸' } as const
       const statusColor = { done: 'success', open: 'warning', paused: 'warning' } as const
+      const order = { open: 0, paused: 1, done: 2 } as const
+      const decisions = [...map.decisions].sort((a, b) => order[a.status] - order[b.status])
+
+      // Dates a model wrote that the session cannot have (after its last
+      // activity) or out of order are guesses: then no phase shows a date.
+      const latest = new Date(lastMs + DAY).toISOString().slice(0, 10)
+      const froms = map.phases.map(p => p.from).filter((d): d is string => d !== undefined)
+      const isDated =
+        froms.length > 0 &&
+        map.phases.every(p => (p.from ?? '') <= latest && (p.to ?? '') <= latest) &&
+        froms.every((d, i) => i === 0 || (froms[i - 1] ?? '') <= d)
       const dates = (from?: string, to?: string) =>
-        from === undefined ? '' : to === undefined || to === from ? from.slice(5) : `${from.slice(5)} → ${to.slice(5)}`
+        !isDated || from === undefined
+          ? ''
+          : to === undefined || to === from
+            ? from.slice(5)
+            : `${from.slice(5)} → ${to.slice(5)}`
+      const span = isDated ? dates(map.phases[0]?.from, map.phases.at(-1)?.to ?? map.phases.at(-1)?.from) : ''
+
+      const rail = (text: string, color?: string) => (
+        <Box flexDirection="row">
+          <Box width={3}>
+            <Text dimColor>│</Text>
+          </Box>
+          <Box flexGrow={1} flexShrink={1}>
+            <Text dimColor={color === undefined} color={color} size="footnote">
+              {text}
+            </Text>
+          </Box>
+        </Box>
+      )
 
       return (
         <Box flexDirection="column" gap={1}>
           {map.phases.length > 0 && (
             <Box flexDirection="column">
-              <Text dimColor size="caption" weight="bold">
-                JOURNEY
-              </Text>
-              {map.phases.map((p, i) => (
-                <Box flexDirection="column">
-                  <Text>
-                    <Text color={p.pivot ? 'warning' : 'claude'}>{p.pivot ? '◆' : '●'} </Text>
-                    <Text weight="semibold">{p.title}</Text>
-                    <Text dimColor>
-                      {'  '}
-                      {dates(p.from, p.to)}
-                      {p.pivot ? '  · pivot' : ''}
-                    </Text>
-                  </Text>
-                  {p.summary !== undefined && (
-                    <Text dimColor size="footnote">
-                      {i < map.phases.length ? '│ ' : '  '}
-                      {p.summary}
-                    </Text>
-                  )}
-                </Box>
-              ))}
-              <Text>
-                <Text color="success">◉ </Text>
-                <Text weight="semibold">You are here</Text>
-              </Text>
-              {resume !== undefined && (
-                <Text dimColor size="footnote">
-                  {'  '}
-                  {oneLine(resume, 200)}
+              <Box flexDirection="row" justifyContent="space-between">
+                <Text dimColor size="caption" weight="bold">
+                  JOURNEY
                 </Text>
+                <Text dimColor size="caption">
+                  {map.phases.length} phases{span !== '' ? ` · ${span}` : ''}
+                </Text>
+              </Box>
+              {map.phases.map((p, i) => {
+                const isLast = i === map.phases.length - 1
+
+                return (
+                  <Box flexDirection="column">
+                    <Box flexDirection="row" justifyContent="space-between" gap="sm">
+                      <Box flexDirection="row" flexShrink={1}>
+                        <Box width={3}>
+                          <Text color={p.pivot ? 'warning' : isLast ? 'claude' : 'subtle'}>{p.pivot ? '◆' : '●'}</Text>
+                        </Box>
+                        <Text weight={isLast ? 'bold' : 'semibold'}>
+                          {p.title}
+                          {p.pivot && <Text color="warning"> · pivot</Text>}
+                        </Text>
+                      </Box>
+                      <Text dimColor tabular>
+                        {dates(p.from, p.to)}
+                      </Text>
+                    </Box>
+                    {p.summary !== undefined && rail(p.summary)}
+                    {rail(' ')}
+                  </Box>
+                )
+              })}
+              <Box flexDirection="row">
+                <Box width={3}>
+                  <Text color="success">◉</Text>
+                </Box>
+                <Text color="success" weight="bold">
+                  You are here
+                </Text>
+              </Box>
+              {resume !== undefined && (
+                <Box flexDirection="row">
+                  <Box width={3}>
+                    <Text> </Text>
+                  </Box>
+                  <Box flexGrow={1} flexShrink={1}>
+                    <Text size="footnote">{oneLine(resume, 240)}</Text>
+                  </Box>
+                </Box>
               )}
             </Box>
           )}
 
-          {map.decisions.length > 0 && (
+          {decisions.length > 0 && (
             <Box flexDirection="column" gap="sm">
               <Text dimColor size="caption" weight="bold">
-                DECISIONS
+                DECISIONS · {decisions.length}
               </Text>
-              {map.decisions.map(d => (
-                <Box flexDirection="column" borderStyle="round" borderColor="subtle" paddingX={1}>
-                  <Text>
-                    <Text color={statusColor[d.status]}>{statusMark[d.status]} </Text>
+              {decisions.map(d => (
+                <Box flexDirection="row">
+                  <Box width={3}>
+                    <Text color={statusColor[d.status]}>{statusMark[d.status]}</Text>
+                  </Box>
+                  <Box flexDirection="column" flexGrow={1} flexShrink={1}>
                     <Text weight="semibold">{d.chosen}</Text>
-                  </Text>
-                  {d.rejected.length > 0 && (
-                    <Text dimColor strikethrough>
-                      {d.rejected.join(' · ')}
-                    </Text>
-                  )}
-                  {d.why !== undefined && (
-                    <Text dimColor size="footnote">
-                      {d.why}
-                    </Text>
-                  )}
+                    {(d.rejected.length > 0 || d.why !== undefined) && (
+                      <Text dimColor size="footnote">
+                        {d.rejected.length > 0 && <Text strikethrough>{d.rejected.join(' · ')}</Text>}
+                        {d.rejected.length > 0 && d.why !== undefined ? '  —  ' : ''}
+                        {d.why ?? ''}
+                      </Text>
+                    )}
+                  </Box>
                 </Box>
               ))}
             </Box>
           )}
 
-          <Box flexDirection="row" gap="sm" flexWrap="wrap">
-            {(['shipped', 'open', 'rejected'] as const).map(k =>
-              choice(
-                `map-${k}`,
-                `${label[k]} ${lists[k].length}`,
-                v.mapList === k,
-                () => void update($, view, w => ({ ...w, mapList: w.mapList === k ? undefined : k })),
-              ),
-            )}
-          </Box>
-          {v.mapList !== undefined &&
-            (lists[v.mapList].length > 0 ? (
-              <Markdown text={lists[v.mapList].map(x => `- ${x}`).join('\n')} />
+          <Box flexDirection="column" gap="sm">
+            <Box flexDirection="row" gap="sm" flexWrap="wrap">
+              {(['open', 'shipped', 'rejected'] as const).map(k =>
+                choice(
+                  `map-${k}`,
+                  `${label[k]} ${lists[k].length}`,
+                  shown === k,
+                  () => void update($, view, w => ({ ...w, mapList: k })),
+                ),
+              )}
+            </Box>
+            {lists[shown].length > 0 ? (
+              <Markdown text={lists[shown].map(x => `- ${x}`).join('\n')} />
             ) : (
               <Text dimColor>Nothing here.</Text>
-            ))}
+            )}
+          </Box>
         </Box>
       )
     }
@@ -976,7 +1061,10 @@ export const register: Register = (on, options) => {
           </Box>
         )}
 
-        {recap !== undefined && mode === 'map' && split?.map !== undefined && mapView(split.map, parts.resume)}
+        {recap !== undefined &&
+          mode === 'map' &&
+          split?.map !== undefined &&
+          mapView(split.map, parts.resume, s.mtimeMs)}
         {recap !== undefined && mode === 'map' && split?.map === undefined && job === undefined && (
           <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={1} paddingY="sm">
             <Text weight="semibold">No map for this recap yet</Text>

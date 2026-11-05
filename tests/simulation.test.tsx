@@ -191,6 +191,22 @@ function world(
   return w
 }
 
+// Waits until the plugin's background work is done (a recap runs after the
+// command has answered): the world beneath it unchanged for a few turns of the
+// clock and the event loop.
+async function settled(w: World) {
+  const state = () => `${w.runs.length}/${w.models.length}/${w.toasts.length}/${JSON.stringify([...w.store])}`
+  let seen = ''
+  let quiet = 0
+  for (let i = 0; i < 300 && quiet < 5; i++) {
+    await w.clock.settle()
+    await new Promise(r => setTimeout(r, 1))
+    const now = state()
+    quiet = now === seen ? quiet + 1 : 0
+    seen = now
+  }
+}
+
 async function startSession($: Engine) {
   await $.session.start({ cwd: '/code/app', surface: 'desktop', isInteractive: true })
 }
@@ -209,7 +225,7 @@ test('/session-recap on a short session: one call to the session model, the reca
   const w = world(on)
   await startSession($)
   await typeCommand($)
-  await w.clock.settle()
+  await settled(w)
 
   expect(w.models.map(m => [m.stage, m.model])).toEqual([['merge', 'the-session-model']])
   expect(w.models[0]?.prompt).toContain('Session title: Build the app')
@@ -234,7 +250,7 @@ test('a long session is condensed in parts, then merged, all by the session mode
   const w = world(on, { turns: 200 })
   await startSession($)
   await typeCommand($)
-  await w.clock.settle()
+  await settled(w)
 
   const parts = w.models.filter(m => m.stage === 'part')
   expect(parts.length).toBe(3)
@@ -250,7 +266,7 @@ test('part notes are cached: writing the recap again condenses nothing again', a
   const w = world(on, { turns: 200 })
   await startSession($)
   await typeCommand($)
-  await w.clock.settle()
+  await settled(w)
   const ui = await $.ui.mount(PANE)
   await ui.press({ key: 'summarize' })
 
@@ -267,7 +283,7 @@ test(
     const w = world(on, { turns: 200 })
     await startSession($)
     await typeCommand($)
-    await w.clock.settle()
+    await settled(w)
 
     expect(new Set(w.models.filter(m => m.stage === 'part').map(m => m.model))).toEqual(new Set(['haiku']))
     expect(w.models.at(-1)?.model).toBe('the-session-model')
@@ -279,7 +295,7 @@ test('a session that went on is updated from the prompts after the old recap', a
   const w = world(on, { turns: 3, store: { 'recap:claude:cur': old } })
   await startSession($)
   await typeCommand($)
-  await w.clock.settle()
+  await settled(w)
 
   expect(w.runs.some(r => r[3] === 'digest' && r[6] === '2')).toBe(true)
   const merge = w.models.at(-1)
@@ -296,7 +312,7 @@ test('the store keeps the newest 250 recaps and 100 notes', async ($, on) => {
   const w = world(on, { store })
   await startSession($)
   await typeCommand($)
-  await w.clock.settle()
+  await settled(w)
 
   const keys = [...w.store.keys()]
   expect(keys.filter(k => k.startsWith('recap:')).length).toBe(250)
@@ -312,7 +328,7 @@ test('a recap stored by version 0.2 (keyed by id alone) is still found', async (
   const w = world(on, { store: { 'recap:cur': recap } })
   await startSession($)
   await typeCommand($)
-  await w.clock.settle()
+  await settled(w)
 
   expect(w.models).toEqual([])
   const ui = await $.ui.mount(PANE)
@@ -324,7 +340,7 @@ test('a model failure is shown in the pane and the recap can be retried', async 
   const w = world(on, { failStage: 'merge' })
   await startSession($)
   await typeCommand($)
-  await w.clock.settle()
+  await settled(w)
 
   expect(w.store.get('recap:claude:cur')).toBeUndefined()
   const ui = await $.ui.mount(PANE)
@@ -340,7 +356,7 @@ test('browse: pick a project, filter by agent, pick a Codex session, write its r
   const w = world(on)
   await startSession($)
   await typeCommand($, 'browse')
-  await w.clock.settle()
+  await settled(w)
 
   const ui = await $.ui.mount(PANE)
   // This session's folder is the project pinned on top; other agents' sessions are named beside it.
@@ -369,7 +385,7 @@ test('without python3 on PATH it falls back to /usr/bin/python3', async ($, on) 
   const w = world(on, { pythonMissing: true })
   await startSession($)
   await typeCommand($)
-  await w.clock.settle()
+  await settled(w)
 
   expect(w.runs.some(r => r[0] === '/usr/bin/python3')).toBe(true)
   expect(w.store.get('recap:claude:cur')).toBeDefined()
@@ -379,7 +395,7 @@ test("/session-recap <project name> opens that project's sessions", async ($, on
   const w = world(on)
   await startSession($)
   await typeCommand($, 'App')
-  await w.clock.settle()
+  await settled(w)
 
   expect(w.models).toEqual([])
   const ui = await $.ui.mount(PANE)
@@ -392,7 +408,7 @@ test("/session-recap <session title> writes that session's recap", async ($, on)
   const w = world(on)
   await startSession($)
   await typeCommand($, 'old idea')
-  await w.clock.settle()
+  await settled(w)
 
   expect(w.runs.some(r => r[3] === 'digest' && r[5] === OTHER.path)).toBe(true)
   expect(w.store.get('recap:codex:old')).toBeDefined()
@@ -403,7 +419,7 @@ test('/session-recap <unknown name> says nothing matched', async ($, on) => {
   const w = world(on)
   await startSession($)
   await typeCommand($, 'nowhere')
-  await w.clock.settle()
+  await settled(w)
 
   expect(w.models).toEqual([])
   const ui = await $.ui.mount(PANE)
@@ -428,7 +444,7 @@ test('Projects: this IDE by default, grouped by time, temporary folders folded, 
   const w = world(on, { projects: MORE })
   await startSession($)
   await typeCommand($, 'browse')
-  await w.clock.settle()
+  await settled(w)
 
   const ui = await $.ui.mount(PANE)
   expect(await ui.find({ key: '/home/me/code/api' })).toBeDefined()
@@ -455,7 +471,7 @@ test('the scope chosen in an earlier session is the one a new session opens with
   const w = world(on, { projects: MORE, store: { prefs: { model: '', partModel: '', scope: 'all' } } })
   await startSession($)
   await typeCommand($, 'browse')
-  await w.clock.settle()
+  await settled(w)
 
   const ui = await $.ui.mount(PANE)
   expect(await ui.find({ key: '/home/me/code/codex-only' })).toBeDefined()
@@ -466,7 +482,7 @@ test('a model picked in the pane writes the recap, is kept, and is named on the 
   const w = world(on, { turns: 200 })
   await startSession($)
   await typeCommand($, 'browse')
-  await w.clock.settle()
+  await settled(w)
 
   const ui = await $.ui.mount(PANE)
   await ui.press({ key: 'settings' })
@@ -497,7 +513,7 @@ test(
     const w = world(on)
     await startSession($)
     await typeCommand($)
-    await w.clock.settle()
+    await settled(w)
 
     expect(w.models.at(-1)?.model).toBe('opus')
   },
@@ -531,7 +547,7 @@ test('Recap is the default; Map draws the journey, the decisions and the lists',
   const w = world(on)
   await startSession($)
   await typeCommand($)
-  await w.clock.settle()
+  await settled(w)
 
   // The recap is asked for its map, and stores it after the Markdown.
   expect(w.models.at(-1)?.prompt).toContain('```json recap-map')
@@ -549,14 +565,19 @@ test('Recap is the default; Map draws the journey, the decisions and the lists',
   await ui.press({ key: 'mode-map' })
   expect(await ui.find({ type: 'Text', text: /^INTENT$/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^JOURNEY$/ })).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /Explore/ }))?.text).toBe('● Explore  10-13 → 10-14')
-  expect((await ui.find({ type: 'Text', text: /Radio site/ }))?.text).toBe('◆ Radio site  11-01  · pivot')
+  expect(await ui.find({ type: 'Text', text: /^Explore$/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^Radio site/ }))?.text).toBe('Radio site · pivot')
+  // This session was last active long before the dates the map gives: they are guesses, not shown.
+  expect(await ui.find({ type: 'Text', text: /10-13/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^2 phases$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Write tests\./ })).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /Web first/ }))?.text).toBe('✓ Web first, with a PWA')
+  expect(await ui.find({ type: 'Text', text: /^Web first, with a PWA$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Native app$/ })).toMatchObject({ props: { strikethrough: true } })
+  // The open list shows first; the others are one press away.
   expect(await ui.find({ key: 'map-open' })).toMatchObject({ text: 'Open 2' })
-  await ui.press({ key: 'map-open' })
   expect(await ui.find({ type: 'Markdown', text: /EU tax not verified/ })).toBeDefined()
+  await ui.press({ key: 'map-shipped' })
+  expect(await ui.find({ type: 'Markdown', text: /PWA push/ })).toBeDefined()
   await ui.press({ key: 'mode-recap' })
   expect(await ui.find({ type: 'Text', text: /^INTENT$/ })).toBeDefined()
   await ui.unmount()
@@ -573,7 +594,7 @@ test('a recap written before maps gets one from its Markdown, on request', async
   const w = world(on, { store: { 'recap:claude:cur': old } })
   await startSession($)
   await typeCommand($)
-  await w.clock.settle()
+  await settled(w)
   expect(w.models).toEqual([])
 
   const ui = await $.ui.mount(PANE)
@@ -583,6 +604,8 @@ test('a recap written before maps gets one from its Markdown, on request', async
   // One small call, reading the recap alone.
   expect(w.models.map(m => m.stage)).toEqual(['map'])
   expect(w.models[0]?.prompt).toContain('<recap>\n## Intent\nCached.')
+  // It is told when the session last ran, so it does not date phases past it.
+  expect(w.models[0]?.prompt).toContain('to 1970-01-01T00:00:02.000Z')
   expect(await ui.find({ type: 'Text', text: /^JOURNEY$/ })).toBeDefined()
   const saved = w.store.get('recap:claude:cur') as { markdown: string; at: number }
   expect(saved.markdown.startsWith('## Intent\nCached.')).toBe(true)
@@ -598,7 +621,7 @@ test(
     const w = world(on, { noMap: true })
     await startSession($)
     await typeCommand($)
-    await w.clock.settle()
+    await settled(w)
 
     const ui = await $.ui.mount(PANE)
     expect(await ui.find({ type: 'Markdown', text: /Build the app\./ })).toBeDefined()

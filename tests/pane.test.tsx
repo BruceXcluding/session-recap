@@ -109,3 +109,64 @@ test('a view an earlier version stored is declined', async ($, on) => {
   expect((await ui.find({ type: 'Text', text: /Loading/ }))?.text).toBe('Loading projects…')
   await ui.unmount()
 })
+
+const MAP = (dates: [string, string?][]) =>
+  JSON.stringify({
+    phases: dates.map(([from, to], i) => ({
+      title: `Phase ${i + 1}`,
+      from,
+      to,
+      summary: `step ${i + 1}`,
+      pivot: i === 1,
+    })),
+    decisions: [
+      { chosen: 'Keep going', rejected: [], status: 'done' },
+      { chosen: 'Test demand first', rejected: ['Ads'], why: 'cheapest signal', status: 'open' },
+    ],
+    shipped: ['A'],
+    open: ['B'],
+    rejected: [],
+  })
+
+function mapView(map: string, mtimeMs: number) {
+  const session = { ...SESSION, mtimeMs }
+  return seed({
+    screen: 'recap',
+    mode: 'map',
+    projects: [PROJECT],
+    project: PROJECT,
+    sessions: [session],
+    session,
+    recap: { size: 2000, mtimeMs, at: 0, markdown: `## Intent\nX\n\n\`\`\`json recap-map\n${map}\n\`\`\`` },
+  })
+}
+
+test('the map shows dates the session can have, in order, and the open decisions first', async ($, on) => {
+  on('state.get', (_, e) =>
+    e.key === 'jobs'
+      ? { value: { value: { shape: 'jobs-4', value: {} }, version: 1 } }
+      : mapView(MAP([['2026-10-13', '2026-10-20'], ['2026-10-29']]), Date.parse('2026-11-02'))(_, e),
+  )
+
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Text', text: /^10-13 → 10-20$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^2 phases · 10-13 → 10-29$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^DECISIONS · 2$/ })).toBeDefined()
+    const [first] = await ui.findAll({ type: 'Text', text: /^(Keep going|Test demand first)$/ })
+    expect(first?.text).toBe('Test demand first')
+    await ui.unmount()
+  }
+})
+
+test('dates after the session last ran, or out of order, are not shown', async ($, on) => {
+  on('state.get', (_, e) =>
+    e.key === 'jobs'
+      ? { value: { value: { shape: 'jobs-4', value: {} }, version: 1 } }
+      : mapView(MAP([['2026-10-13'], ['2026-11-12']]), Date.parse('2026-11-02'))(_, e),
+  )
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: /11-12|10-13/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^2 phases$/ })).toBeDefined()
+  await ui.unmount()
+})

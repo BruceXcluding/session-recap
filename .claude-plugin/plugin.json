@@ -1,6 +1,6 @@
 {
   "name": "session-recap",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Recap any AI coding session (Claude Code, Codex, dsh, OpenCode) in a side pane or from the command line: its intent, key decisions, what changed, open threads and where to resume.",
   "author": {
     "name": "BruceXcluding",

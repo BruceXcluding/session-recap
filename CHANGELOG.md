@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-11-05
+
+### Changed
+- **Map layout.** Phases run down a rail with their dates right-aligned and a
+  phase count and span in the header; the current phase is highlighted. Decisions
+  are a lighter list (no boxes), open and paused ones first, with the turned-down
+  alternatives and the reason on one line. The Open list shows by default.
+
+### Fixed
+- Dates a model guessed (after the session's last activity, or out of order) are no
+  longer shown; **Build map** tells the model when the session last ran.
+- A recap no longer fails when the host's clock cannot answer, and the progress timer
+  stops itself when its host is gone.
+- The simulation tests wait for a recap's background work, which made them flaky.
+
 ## [0.5.0] - 2026-11-05
 
 ### Added
@@ -122,6 +137,7 @@ All notable changes to this project are documented here. The format follows
 - Long sessions are condensed in parts in parallel, then merged into one recap.
 - Recaps are cached per session and rewritten only when the session changes.
 
+[0.5.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.5.1
 [0.5.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.5.0
 [0.4.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.4.1
 [0.4.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.4.0
