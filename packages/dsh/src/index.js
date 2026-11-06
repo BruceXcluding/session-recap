@@ -5,7 +5,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
-import { recapCommand, recapTool } from './recap.js'
+import { panelRoute, recapCommand, recapTool } from './recap.js'
 
 export const name = 'dsh-session-recap'
 export const inject = ['llm', 'tools']
@@ -59,5 +59,13 @@ export function apply(ctx, config) {
     })
   } catch (err) {
     console.error(`[dsh-session-recap] /recap not registered: ${err instanceof Error ? err.message : err}`)
+  }
+  // The web panel's read route, behind dsh's own browser authentication.
+  try {
+    ctx.inject(['connection'], connectionCtx => {
+      connectionCtx.effect(() => connectionCtx.connection.fetch.register(panelRoute(deps)), 'session-recap: panel route')
+    })
+  } catch (err) {
+    console.error(`[dsh-session-recap] panel route not registered: ${err instanceof Error ? err.message : err}`)
   }
 }

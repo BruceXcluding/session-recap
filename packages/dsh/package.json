@@ -6,10 +6,12 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./client": "./client/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
   "files": [
     "src",
+    "client",
     "vendor",
     "cordis.patch.yml",
     "README.md"
@@ -54,6 +56,12 @@
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
     }
   }
 }

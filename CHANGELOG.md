@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- **dsh side panel:** a **Session recap** tab in dsh web's right sidebar, at parity with the Claude Code pane: this
+  session's recap (Intent and Where to resume cards, Recap and Map views, section tabs, Copy), the sessions of any
+  project from every agent with their recap state, and **Write recap** / **Update recap** with the session's model.
+  It reads through an authenticated dsh route, so browsing writes nothing into the chat.
+- `/recap --refresh [session]` writes a recap again even when the stored one is current.
+
 ### Fixed
 - dsh plugin, found by running it in dsh 0.2.2-rc.1 (a full recap now verified there, by the command and the
   agent tool): `/recap <title words>` is now a command (it declares an

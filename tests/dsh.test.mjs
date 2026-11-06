@@ -13,6 +13,7 @@ let home
 let recapTool
 let recapCommand
 let routeOf
+let panelRoute
 const SESSION = 'session-11111111-2222-3333-4444-555555555555'
 
 const hasZstd = (() => {
@@ -56,7 +57,7 @@ before(async () => {
     writeFileSync(join(dir, 'session.v3.jsonl'), `${records.map(r => JSON.stringify(r)).join('\n')}\n`)
     execFileSync('zstd', ['-q', '--rm', '-o', join(dir, 'session.v3.jsonl.zstd'), join(dir, 'session.v3.jsonl')])
   }
-  ;({ recapTool, recapCommand, routeOf } = await import('../packages/dsh/src/recap.js'))
+  ;({ recapTool, recapCommand, routeOf, panelRoute } = await import('../packages/dsh/src/recap.js'))
 })
 
 after(() => rmSync(home, { recursive: true, force: true }))
@@ -110,7 +111,7 @@ test('a session named by title is recapped with the session’s model, then reus
 test('/recap reports errors as command errors', async () => {
   const command = recapCommand(deps)
   assert.equal(command.name, 'recap')
-  assert.equal(command.input.hint, 'title words or a session id; empty for this session')
+  assert.equal(command.input.hint, 'title words or a session id; empty for this session; --refresh to write it again')
   const r = await command.handler({ rawInput: ' nothing matches this', agent: agentOn('x') })
   assert.equal(r.kind, 'error')
   assert.match(r.text, /no session matches/)
@@ -140,4 +141,129 @@ test('an empty model reply is an error, and nothing is cached', async () => {
   )
   // The good recap stored earlier is still the one served.
   assert.match(await recapTool(deps).execute({ session: 'dark theme' }, { agent: agentOn('other') }), /Theme it\./)
+})
+
+// ------------------------------------------------------------ the side panel
+
+const askPanel = async (request, agent = agentOn('other')) => {
+  const r = await recapCommand(deps).handler({ rawInput: ` --panel ${JSON.stringify(request)}`, agent })
+  assert.equal(r.kind, 'success')
+  return JSON.parse(r.text)
+}
+
+test('/recap --panel answers JSON: sessions of a project, with their recaps marked', async () => {
+  const before = calls.length
+  const answer = await askPanel({ op: 'sessions', cwd: '/code/web' })
+  assert.equal(answer.ok, true)
+  const row = answer.value.sessions.find(s => s.agent === 'claude')
+  assert.equal(row.title, 'Add a dark theme')
+  assert.equal(row.recap.fresh, true)
+  assert.equal(row.recap.intent, 'Theme it.')
+  assert.equal(calls.length, before, 'reading writes nothing')
+})
+
+test('/recap --panel get splits the stored recap into Markdown, map and sections', async () => {
+  const { value } = await askPanel({ op: 'sessions', cwd: '/code/web' })
+  const row = value.sessions.find(s => s.agent === 'claude')
+  const got = await askPanel({ op: 'get', agent: 'claude', id: row.id })
+  assert.equal(got.ok, true)
+  assert.doesNotMatch(got.value.recap.markdown, /recap-map/)
+  assert.deepEqual(got.value.recap.map.phases.map(p => p.title), ['Theme'])
+  assert.equal(got.value.recap.sections.resume, 'Ship.')
+  assert.equal(got.value.recap.model, 'deepseek-v4-flash')
+})
+
+test('/recap --panel write rewrites on request; errors come back as ok: false', async () => {
+  const { value } = await askPanel({ op: 'sessions', cwd: '/code/web' })
+  const row = value.sessions.find(s => s.agent === 'claude')
+  const before = calls.length
+  const written = await askPanel({ op: 'write', agent: 'claude', id: row.id, refresh: true })
+  assert.equal(written.ok, true)
+  assert.equal(calls.length, before + 1)
+  assert.equal(written.value.recap.sections.intent, 'Theme it.')
+  assert.deepEqual(await askPanel({ op: 'nope' }), { ok: false, error: 'unknown panel request "nope"' })
+  assert.match((await askPanel({ op: 'get', agent: 'claude', id: 'missing' })).error, /no claude session missing/)
+  const bad = await recapCommand(deps).handler({ rawInput: '--panel {oops', agent: agentOn('x') })
+  assert.equal(JSON.parse(bad.text).ok, false)
+})
+
+test(
+  '/recap --panel home: the running session, its project and whether a recap can be written',
+  { skip: !hasZstd && 'needs zstd' },
+  async () => {
+    const { ok, value } = await askPanel({ op: 'home' }, agentOn(SESSION))
+    assert.equal(ok, true)
+    assert.equal(value.current.session.id, SESSION)
+    assert.equal(value.cwd, '/code/web')
+    assert.deepEqual(value.sessions.map(s => s.agent).sort(), ['claude', 'dsh'])
+    assert.equal(value.canWrite, true)
+  },
+)
+
+// The browser half, with the host's module loader and React stood in for:
+// a render is one synchronous call, hooks give their first values.
+test('the web client registers its right-sidebar tab and renders without a session', async () => {
+  const { readFileSync } = await import('node:fs')
+  const tree = (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) })
+  const React = {
+    createElement: tree,
+    useState: v => [v, () => {}],
+    useEffect: () => {},
+    useCallback: f => f,
+    useRef: v => ({ current: v }),
+  }
+  let loaded
+  globalThis.window = { __ModuleLoader__: { load: m => (loaded = m) } }
+  try {
+    new Function(readFileSync(new URL('../packages/dsh/client/client.js', import.meta.url), 'utf8'))()
+  } finally {
+    delete globalThis.window
+  }
+  assert.equal(loaded.id, 'dsh-session-recap')
+  const mod = loaded.factory(name => {
+    assert.equal(name, 'react')
+    return React
+  })
+  assert.deepEqual(mod.inject, ['slots', 'sidebarRightTabs'])
+  const registered = { tabs: [], slots: {} }
+  mod.apply({
+    effect: f => f(),
+    sidebarRightTabs: { register: t => registered.tabs.push(t) },
+    slots: { inject: (_name, f) => f(), register: (key, c) => (registered.slots[key.name] = c) },
+  })
+  assert.equal(registered.tabs[0].kind, 'session-recap')
+  assert.equal(registered.tabs[0].priority, 'extension')
+  const Body = registered.slots['sidebar.right.pane.tab']
+  const text = node => {
+    if (typeof node === 'string') return node
+    if (typeof node?.type === 'function') return text(node.type({ ...node.props, children: node.children }))
+    return node?.children ? node.children.map(text).join('') : ''
+  }
+  assert.match(text(Body({})), /Open a session to see its recap/)
+  assert.match(text(Body({ sessionId: 's1' })), /Reading sessions/)
+  assert.equal(registered.slots['sidebar.right.pane.tab.title']({}), 'Session recap')
+})
+
+test('the panel route reads without the chat, and refuses writes', async () => {
+  const route = panelRoute(deps)
+  assert.equal(route.path, '/api/session-recap/panel')
+  assert.deepEqual(route.methods, ['POST'])
+  const post = body => route.fetch(new Request('http://dsh/api/session-recap/panel', { method: 'POST', body: JSON.stringify(body) }))
+  const res = await post({ op: 'sessions', cwd: '/code/web' })
+  assert.equal(res.headers.get('cache-control'), 'no-store')
+  const answer = await res.json()
+  assert.equal(answer.ok, true)
+  assert.ok(answer.value.sessions.some(s => s.title === 'Add a dark theme'))
+  assert.deepEqual(await (await post({ op: 'write', agent: 'claude', id: 'x' })).json(), {
+    ok: false,
+    error: 'write a recap with /recap in the session',
+  })
+})
+
+test('/recap --refresh <words> writes the named recap again', async () => {
+  const before = calls.length
+  const r = await recapCommand(deps).handler({ rawInput: '--refresh dark theme', agent: agentOn('other') })
+  assert.equal(r.kind, 'success')
+  assert.match(r.text, /new recap by/)
+  assert.equal(calls.length, before + 1)
 })
