@@ -1,8 +1,9 @@
 # Draft for https://github.com/awesome-dsh-plugin/awesome-dsh-plugin, as
-# data/plugins/BruceXcluding__session-recap.yml. Submit after the v0.6.1 release
-# (the tarball must exist) and once the repository is a day old.
-url: https://github.com/BruceXcluding/session-recap
-name: BruceXcluding/session-recap
+# data/plugins/BruceXcluding__session-recap--packages-dsh.yml (a monorepo
+# subpackage: the dsh.bundle manifest is in packages/dsh/package.json).
+# Needs the dsh-plugin topic on the repo and the repo a day old (2026-11-06 08:27 UTC).
+url: https://github.com/BruceXcluding/session-recap/tree/main/packages/dsh
+name: BruceXcluding/session-recap#dsh
 category: session
 tarball: https://github.com/BruceXcluding/session-recap/releases/download/v0.6.1/dsh-session-recap-0.6.1.tgz
 description:
