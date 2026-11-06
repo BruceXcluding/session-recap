@@ -5,13 +5,13 @@
   "description": "Recap AI coding sessions (Claude Code, Codex, dsh, OpenCode): intent, decisions, open threads.",
   "websiteUrl": "https://github.com/BruceXcluding/session-recap",
   "repository": { "url": "https://github.com/BruceXcluding/session-recap", "source": "github" },
-  "version": "0.6.0",
+  "version": "0.6.1",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "session-recap",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "runtimeHint": "npx",
       "transport": { "type": "stdio" },
       "packageArguments": [{ "type": "positional", "value": "mcp" }]

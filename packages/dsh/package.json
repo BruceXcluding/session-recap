@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-recap",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Recap any dsh session (and Claude Code, Codex and OpenCode sessions): intent, key decisions, what changed, open threads and where to resume. Adds the session_recap tool and the /recap command.",
   "type": "module",
   "main": "src/index.js",

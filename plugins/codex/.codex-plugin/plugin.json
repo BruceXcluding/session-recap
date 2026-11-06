@@ -1,6 +1,6 @@
 {
   "name": "session-recap",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Recap any coding session (Codex, Claude Code, dsh, OpenCode): intent, key decisions, what changed, open threads and where to resume.",
   "author": { "name": "BruceXcluding" },
   "homepage": "https://github.com/BruceXcluding/session-recap",

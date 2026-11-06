@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [0.6.1] - 2026-11-06
 
 ### Added
 - **dsh side panel:** a **Session recap** tab in dsh web's right sidebar, at parity with the Claude Code pane: this
@@ -185,6 +185,7 @@ All notable changes to this project are documented here. The format follows
 - Long sessions are condensed in parts in parallel, then merged into one recap.
 - Recaps are cached per session and rewritten only when the session changes.
 
+[0.6.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.6.1
 [0.6.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.6.0
 [0.5.1]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.5.1
 [0.5.0]: https://github.com/BruceXcluding/session-recap/releases/tag/v0.5.0

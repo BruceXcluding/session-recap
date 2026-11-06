@@ -14,7 +14,7 @@ A recap has five parts: the intent, key decisions and why, what changed, open th
 ## Install
 
 ```bash
-dsh plugin --profile <profile> add https://github.com/BruceXcluding/session-recap/releases/download/v0.6.0/dsh-session-recap-0.6.0.tgz
+dsh plugin --profile <profile> add https://github.com/BruceXcluding/session-recap/releases/download/v0.6.1/dsh-session-recap-0.6.1.tgz
 ```
 
 In DSH Desktop, install it from **Settings → Plugins**.
