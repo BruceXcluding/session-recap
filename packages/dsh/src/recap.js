@@ -129,6 +129,9 @@ export async function recap({ query, refresh, agent, llm, config, chatText, onPr
     progress: p => onProgress?.(p),
     complete: ({ system, prompt }) => chatText(llm, system, prompt, { route, timeoutMs: 300_000 }),
   })
+  if (typeof markdown !== 'string' || markdown.trim() === '') {
+    throw new Error(`${route.model} returned no recap text`)
+  }
   saveCached(session, digest.prompts, markdown, route.model)
 
   return { text: render(session, markdown, `${meta} · new recap by ${route.model}`), session, cached: false }
@@ -177,10 +180,12 @@ export function recapCommand({ chatText, llm, config }) {
   return {
     name: 'recap',
     description: 'Recap this session (or one named after /recap): intent, decisions, changes, open threads, next step',
+    // Declared so `/recap <words>` is a command, not a message to the model.
+    input: { hint: 'title words or a session id; empty for this session' },
     handler: async invocation => {
       try {
         const r = await recap({
-          query: typeof invocation?.input === 'string' ? invocation.input : invocation?.args,
+          query: typeof invocation?.rawInput === 'string' ? invocation.rawInput.trim() : undefined,
           agent: invocation?.agent,
           llm,
           config,

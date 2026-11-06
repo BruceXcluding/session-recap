@@ -35,6 +35,12 @@ async function chatText(llm, system, user, { route, timeoutMs = 300_000 }) {
   } finally {
     clearTimeout(timer)
   }
+  // The runtime reports a failed call (no key, quota, network) as the stream's
+  // finish reason, not by throwing: an empty reply is never a recap.
+  const finish = assembler.finish
+  if (finish?.kind === 'error' || finish?.kind === 'aborted') {
+    throw new Error(`${route.model}: ${finish.failure?.code ?? finish.kind}: ${finish.failure?.message ?? 'no reply'}`)
+  }
   const message = assembler.message({ provider: route.provider, model: route.model })
 
   return (message.content ?? [])

@@ -110,7 +110,8 @@ test('a session named by title is recapped with the session’s model, then reus
 test('/recap reports errors as command errors', async () => {
   const command = recapCommand(deps)
   assert.equal(command.name, 'recap')
-  const r = await command.handler({ input: 'nothing matches this', agent: agentOn('x') })
+  assert.equal(command.input.hint, 'title words or a session id; empty for this session')
+  const r = await command.handler({ rawInput: ' nothing matches this', agent: agentOn('x') })
   assert.equal(r.kind, 'error')
   assert.match(r.text, /no session matches/)
 })
@@ -123,3 +124,20 @@ test(
     assert.match(text, /^# Fix the login page\n\n> dsh · \/code\/web · new recap/)
   },
 )
+
+test('/recap <words> recaps the named session (rawInput is the text after the name)', async () => {
+  const r = await recapCommand(deps).handler({ rawInput: ' dark theme', agent: agentOn('other') })
+  assert.equal(r.kind, 'success')
+  assert.match(r.text, /^# Add a dark theme\n/)
+})
+
+test('an empty model reply is an error, and nothing is cached', async () => {
+  const empty = { ...deps, chatText: async () => '' }
+  const tool = recapTool(empty)
+  await assert.rejects(
+    tool.execute({ session: 'dark theme', refresh: true }, { agent: agentOn('other') }),
+    /returned no recap text/,
+  )
+  // The good recap stored earlier is still the one served.
+  assert.match(await recapTool(deps).execute({ session: 'dark theme' }, { agent: agentOn('other') }), /Theme it\./)
+})
