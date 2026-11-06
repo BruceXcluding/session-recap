@@ -168,7 +168,10 @@ test('/recap --panel get splits the stored recap into Markdown, map and sections
   const got = await askPanel({ op: 'get', agent: 'claude', id: row.id })
   assert.equal(got.ok, true)
   assert.doesNotMatch(got.value.recap.markdown, /recap-map/)
-  assert.deepEqual(got.value.recap.map.phases.map(p => p.title), ['Theme'])
+  assert.deepEqual(
+    got.value.recap.map.phases.map(p => p.title),
+    ['Theme'],
+  )
   assert.equal(got.value.recap.sections.resume, 'Ship.')
   assert.equal(got.value.recap.model, 'deepseek-v4-flash')
 })
@@ -248,7 +251,8 @@ test('the panel route reads without the chat, and refuses writes', async () => {
   const route = panelRoute(deps)
   assert.equal(route.path, '/api/session-recap/panel')
   assert.deepEqual(route.methods, ['POST'])
-  const post = body => route.fetch(new Request('http://dsh/api/session-recap/panel', { method: 'POST', body: JSON.stringify(body) }))
+  const post = body =>
+    route.fetch(new Request('http://dsh/api/session-recap/panel', { method: 'POST', body: JSON.stringify(body) }))
   const res = await post({ op: 'sessions', cwd: '/code/web' })
   assert.equal(res.headers.get('cache-control'), 'no-store')
   const answer = await res.json()

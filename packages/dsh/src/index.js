@@ -63,7 +63,10 @@ export function apply(ctx, config) {
   // The web panel's read route, behind dsh's own browser authentication.
   try {
     ctx.inject(['connection'], connectionCtx => {
-      connectionCtx.effect(() => connectionCtx.connection.fetch.register(panelRoute(deps)), 'session-recap: panel route')
+      connectionCtx.effect(
+        () => connectionCtx.connection.fetch.register(panelRoute(deps)),
+        'session-recap: panel route',
+      )
     })
   } catch (err) {
     console.error(`[dsh-session-recap] panel route not registered: ${err instanceof Error ? err.message : err}`)

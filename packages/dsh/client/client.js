@@ -43,7 +43,10 @@ window.__ModuleLoader__.load({
       return Promise.resolve(commands.execute(sessionId, line, [], controller.signal))
         .then(function (envelope) {
           if (envelope && envelope.ok === false) {
-            return { ok: false, error: String((envelope.error && envelope.error.message) || envelope.error || 'rejected') }
+            return {
+              ok: false,
+              error: String((envelope.error && envelope.error.message) || envelope.error || 'rejected'),
+            }
           }
           var execution = envelope && 'value' in envelope ? envelope.value : envelope
           var result = (execution && execution.result) || execution
@@ -253,7 +256,9 @@ window.__ModuleLoader__.load({
             list = { ordered: ordered, items: [] }
           }
           var nested = item[1].length >= 2
-          list.items.push(h('li', { key: 'i' + n++, style: nested ? { marginLeft: 14 } : undefined }, inline(item[3], 'i' + n)))
+          list.items.push(
+            h('li', { key: 'i' + n++, style: nested ? { marginLeft: 14 } : undefined }, inline(item[3], 'i' + n)),
+          )
           continue
         }
         if (line.trim() === '') {
@@ -263,7 +268,15 @@ window.__ModuleLoader__.load({
         if (list && /^\s{2,}\S/.test(line)) {
           // A wrapped list item.
           var last = list.items.pop()
-          list.items.push(h('li', { key: last.key, style: last.props.style }, last.props.children, ' ', inline(line.trim(), 'w' + n++)))
+          list.items.push(
+            h(
+              'li',
+              { key: last.key, style: last.props.style },
+              last.props.children,
+              ' ',
+              inline(line.trim(), 'w' + n++),
+            ),
+          )
           continue
         }
         if (list) flush()
@@ -363,7 +376,12 @@ window.__ModuleLoader__.load({
               return h(
                 'div',
                 { key: i, className: 'sr-dec' },
-                h('div', { className: 'sr-dec-t' }, h('b', null, d.chosen), h('span', { className: 'sr-st ' + d.status }, d.status)),
+                h(
+                  'div',
+                  { className: 'sr-dec-t' },
+                  h('b', null, d.chosen),
+                  h('span', { className: 'sr-st ' + d.status }, d.status),
+                ),
                 d.rejected.length > 0 && h('div', { className: 'sr-rej' }, d.rejected.join(' · ')),
                 d.why && h('div', { className: 'sr-why' }, d.why),
               )
@@ -440,7 +458,12 @@ window.__ModuleLoader__.load({
         { className: 'sr-top' },
         h(
           'button',
-          { type: 'button', className: recap ? 'sr-btn' : 'sr-btn pri', disabled: props.busy || !props.canWrite, onClick: props.onWrite },
+          {
+            type: 'button',
+            className: recap ? 'sr-btn' : 'sr-btn pri',
+            disabled: props.busy || !props.canWrite,
+            onClick: props.onWrite,
+          },
           recap ? (session.recap && session.recap.fresh ? 'Rewrite' : 'Update recap') : 'Write recap',
         ),
         recap &&
@@ -488,9 +511,20 @@ window.__ModuleLoader__.load({
         body = h(
           'div',
           null,
-          s.intent && h('div', { className: 'sr-card' }, h('div', { className: 'sr-label' }, 'Intent'), h(Markdown, { text: s.intent })),
+          s.intent &&
+            h(
+              'div',
+              { className: 'sr-card' },
+              h('div', { className: 'sr-label' }, 'Intent'),
+              h(Markdown, { text: s.intent }),
+            ),
           s.resume &&
-            h('div', { className: 'sr-card resume' }, h('div', { className: 'sr-label' }, 'Where to resume'), h(Markdown, { text: s.resume })),
+            h(
+              'div',
+              { className: 'sr-card resume' },
+              h('div', { className: 'sr-label' }, 'Where to resume'),
+              h(Markdown, { text: s.resume }),
+            ),
           h(
             'div',
             { className: 'sr-tabs', role: 'tablist' },
@@ -543,12 +577,20 @@ window.__ModuleLoader__.load({
           },
           (props.projects || [{ cwd: props.cwd || '', sessions: rows.length }])
             .concat(
-              props.projects && props.cwd && !props.projects.some(function (p) { return p.cwd === props.cwd })
+              props.projects &&
+                props.cwd &&
+                !props.projects.some(function (p) {
+                  return p.cwd === props.cwd
+                })
                 ? [{ cwd: props.cwd, sessions: rows.length }]
                 : [],
             )
             .map(function (p) {
-              return h('option', { key: p.cwd, value: p.cwd }, (p.cwd ? short(p.cwd) : 'No project') + ' · ' + p.sessions)
+              return h(
+                'option',
+                { key: p.cwd, value: p.cwd },
+                (p.cwd ? short(p.cwd) : 'No project') + ' · ' + p.sessions,
+              )
             }),
         ),
         agents.length > 1 &&
@@ -718,7 +760,8 @@ window.__ModuleLoader__.load({
           )
         }
 
-        if (!sessionId) return h('div', { className: 'sr' }, h('p', { className: 'sr-muted' }, 'Open a session to see its recap.'))
+        if (!sessionId)
+          return h('div', { className: 'sr' }, h('p', { className: 'sr-muted' }, 'Open a session to see its recap.'))
         if (state.phase === 'loading') return h('div', { className: 'sr' }, h(Progress, { label: 'Reading sessions…' }))
         if (state.phase === 'failed')
           return h(
@@ -808,7 +851,11 @@ window.__ModuleLoader__.load({
                   write(home.current.session, !!(home.current.session.recap && home.current.session.recap.fresh))
                 },
               })
-            : h('p', { className: 'sr-muted' }, 'This session has no saved transcript yet. Recap it after a turn, or pick another session.')
+            : h(
+                'p',
+                { className: 'sr-muted' },
+                'This session has no saved transcript yet. Recap it after a turn, or pick another session.',
+              )
         } else if (other[0]) {
           body = h(RecapView, {
             data: other[0],
@@ -821,7 +868,12 @@ window.__ModuleLoader__.load({
           })
         } else body = errSt[0] ? h('div', { className: 'sr-err' }, errSt[0]) : h(Progress, { label: 'Opening…' })
 
-        return h('div', { className: 'sr', 'data-session-recap': typeof open === 'object' ? 'session' : open }, top, body)
+        return h(
+          'div',
+          { className: 'sr', 'data-session-recap': typeof open === 'object' ? 'session' : open },
+          top,
+          body,
+        )
       }
     }
 

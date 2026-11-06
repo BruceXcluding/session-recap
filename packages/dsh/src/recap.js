@@ -307,7 +307,10 @@ export function recapCommand({ chatText, llm, config }) {
           const value = await panel(request, { agent: invocation?.agent, llm, config, chatText })
           return { kind: 'success', text: JSON.stringify({ ok: true, value }) }
         } catch (err) {
-          return { kind: 'success', text: JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }) }
+          return {
+            kind: 'success',
+            text: JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+          }
         }
       }
       const refresh = /^--refresh(\s|$)/.test(input)
