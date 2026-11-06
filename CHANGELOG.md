@@ -7,9 +7,12 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Fixed
-- dsh plugin, found by running it in dsh 0.2.2-rc.1: `/recap <title words>` is now a command (it declares an
+- dsh plugin, found by running it in dsh 0.2.2-rc.1 (a full recap now verified there, by the command and the
+  agent tool): `/recap <title words>` is now a command (it declares an
   input; before, dsh sent the line to the model), its text is read from `rawInput`, and a failed model call (no key,
   quota) is reported as an error instead of being cached as an empty recap.
+- Finding a session by words ranks the id, then an exact title, then whole-word matches, before titles that only
+  contain the words: `/recap rc` picks the session titled "rc", not a newer "/recap rc".
 
 ### Changed
 - session-recap is on npm: install with `npm install -g session-recap`, or run `npx session-recap`.

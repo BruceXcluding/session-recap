@@ -785,8 +785,26 @@ def session_context(query):
 
 
 def find_sessions(query):
-    q = query.lower()
-    return [r for r in all_sessions() if q == r["id"].lower() or q in r["title"].lower()]
+    """Sessions matching `query`, best match first: the id, then the exact
+    title, then titles holding it as a whole word, then anywhere; newest first
+    within each (the listing's order)."""
+    q = query.strip().lower()
+    if not q:
+        return []
+    word = re.compile(r"(?<![\w])%s(?![\w])" % re.escape(q))
+
+    def rank(r):
+        title = r["title"].lower()
+        if q == r["id"].lower():
+            return 0
+        if q == title:
+            return 1
+        if word.search(title):
+            return 2
+        return 3 if q in title else None
+
+    ranked = [(rank(r), i, r) for i, r in enumerate(all_sessions())]
+    return [r for k, i, r in sorted(t for t in ranked if t[0] is not None)]
 
 
 def current_session(agent, cwd):

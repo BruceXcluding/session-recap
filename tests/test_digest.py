@@ -459,5 +459,16 @@ class RedactDigestTest(Base):
         self.assertLessEqual(len(digest.digest("claude", path, 0, 20_000)["text"]), 20_100)
 
 
+class FindTest(Base):
+    def test_exact_title_and_whole_words_come_before_newer_partial_matches(self):
+        old = self.claude("old", [claude_user("rc")])
+        os.utime(old, (1_000_000, 1_000_000))
+        self.claude("new", [claude_user("/recap rc please")])
+        self.claude("newer", [claude_user("source control")])
+        self.assertEqual([r["id"] for r in digest.find_sessions("rc")], ["old", "new", "newer"])
+        self.assertEqual([r["id"] for r in digest.find_sessions("NEW")], ["new"])
+        self.assertEqual(digest.find_sessions("  "), [])
+
+
 if __name__ == "__main__":
     unittest.main()
