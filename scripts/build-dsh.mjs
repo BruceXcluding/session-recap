@@ -21,7 +21,13 @@ if (process.argv.includes('--pack')) {
   const dist = join(root, 'dist')
   mkdirSync(dist, { recursive: true })
   const out = execFileSync('npm', ['pack', '--pack-destination', dist], { cwd: pkg, encoding: 'utf8' })
-  process.stdout.write(`packed ${join(dist, out.trim().split('\n').at(-1))}\n`)
+  const packed = join(dist, out.trim().split('\n').at(-1))
+  // The same tarball under a name without the version: the dsh-market listing
+  // installs releases/latest/download/dsh-session-recap.tgz, so every release
+  // must carry it.
+  const latest = join(dist, 'dsh-session-recap.tgz')
+  copyFileSync(packed, latest)
+  process.stdout.write(`packed ${packed}\nand ${latest}\n`)
 } else {
   process.stdout.write(`vendored into ${vendor}\n`)
 }
